@@ -93,12 +93,14 @@ struct DeletionProgress: Equatable, Sendable {
 /// Outcome of a batch deletion operation.
 struct DeletionReport: Equatable, Identifiable, Sendable {
     let id = UUID()
-    let deletedCount: Int
     let trashedCount: Int
     let simctlDeletedCount: Int
     let reclaimedBytes: Int64
-    let removedItemIDs: Set<StorageItem.ID>
     let failures: [DeletionFailure]
+
+    var deletedCount: Int {
+        trashedCount + simctlDeletedCount
+    }
 
     var hasFailures: Bool {
         !failures.isEmpty

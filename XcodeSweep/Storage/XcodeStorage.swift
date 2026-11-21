@@ -15,7 +15,7 @@ enum ScanEvent: Equatable, Sendable {
     case completed(ScanSnapshot)
 }
 
-/// Ordered lifecycle events emitted by `XcodeStorage.delete(items:)`.
+/// Ordered lifecycle events emitted by `XcodeStorage.delete(_:)`.
 enum DeletionEvent: Equatable, Sendable {
     case starting(DeletionProgress)
     case deleted(itemID: StorageItem.ID, progress: DeletionProgress)
@@ -72,13 +72,28 @@ struct XcodeStorage: Sendable {
 
     // MARK: - Deletion
 
-    /// Deletes items sequentially in input order, streaming start and per-item outcomes followed
-    /// by `.completed(DeletionReport)`. Pull-based iteration provides natural backpressure.
+    /// Deletes the plan's deletable items sequentially in order, streaming start and per-item outcomes
+    /// followed by `.completed(DeletionReport)`. Protected items never reach deletion: the plan sets them aside.
+    /// Pull-based iteration provides natural backpressure.
     /// Cancellation is cooperative: once observed, no subsequent items are started and `CancellationError`
     /// is never recorded as a `DeletionFailure`; an in-flight `FileTrashing` move that cannot be interrupted
     /// may complete and emit its outcome before cancellation is thrown on the next pull.
-    func delete(items: [StorageItem]) -> some AsyncSequence<DeletionEvent, any Error> & Sendable {
-        DeletionStream(storage: self, items: items)
+    func delete(_ plan: DeletionPlan) -> some AsyncSequence<DeletionEvent, any Error> & Sendable {
+        DeletionStream(storage: self, items: plan.deletableItems)
+    }
+
+    /// `item` must come from `DeletionPlan.deletableItems`; a protected item traps.
+    fileprivate func remove(_ item: StorageItem) async throws {
+        switch item.deletionMethod {
+        case let .trashFile(url):
+            try await fileTrasher.trashItem(at: url)
+        case let .simctlDevice(udid, isBooted):
+            try await deleteSimulatorDevice(udid: udid, isBooted: isBooted)
+        case let .simctlRuntime(identifier):
+            try await deleteSimulatorRuntime(identifier: identifier)
+        case .notDeletable:
+            preconditionFailure("DeletionPlan excludes protected items")
+        }
     }
 
     // MARK: - Shared Internal Helpers
@@ -354,17 +369,24 @@ private struct DeletionStream: AsyncSequence, Sendable {
         private let storage: XcodeStorage
         private let items: [StorageItem]
         private var phase: Phase
-        private var deletedCount = 0
         private var trashedCount = 0
         private var simctlDeletedCount = 0
         private var reclaimedBytes: Int64 = 0
-        private var removedItemIDs: Set<StorageItem.ID> = []
         private var failures: [DeletionFailure] = []
 
         init(storage: XcodeStorage, items: [StorageItem]) {
             self.storage = storage
             self.items = items
             phase = items.isEmpty ? .finish : .beforeItem(0)
+        }
+
+        private func progress(completing index: Int) -> DeletionProgress {
+            DeletionProgress(
+                completedCount: index + 1,
+                totalCount: items.count,
+                currentItemName: items[index].name,
+                removedBytes: reclaimedBytes
+            )
         }
 
         mutating func next() async throws -> DeletionEvent? {
@@ -393,68 +415,14 @@ private struct DeletionStream: AsyncSequence, Sendable {
                 phase = index + 1 < items.count ? .beforeItem(index + 1) : .finish
 
                 do {
-                    switch item.deletionMethod {
-                    case let .trashFile(url):
-                        try await storage.fileTrasher.trashItem(at: url)
-                        deletedCount += 1
+                    try await storage.remove(item)
+                    if item.deletionMethod.isPermanent {
+                        simctlDeletedCount += 1
+                    } else {
                         trashedCount += 1
-                        reclaimedBytes += item.sizeBytes
-                        removedItemIDs.insert(item.id)
-                        return .deleted(
-                            itemID: item.id,
-                            progress: DeletionProgress(
-                                completedCount: index + 1,
-                                totalCount: items.count,
-                                currentItemName: item.name,
-                                removedBytes: reclaimedBytes
-                            )
-                        )
-
-                    case let .simctlDevice(udid, isBooted):
-                        try await storage.deleteSimulatorDevice(udid: udid, isBooted: isBooted)
-                        deletedCount += 1
-                        simctlDeletedCount += 1
-                        reclaimedBytes += item.sizeBytes
-                        removedItemIDs.insert(item.id)
-                        return .deleted(
-                            itemID: item.id,
-                            progress: DeletionProgress(
-                                completedCount: index + 1,
-                                totalCount: items.count,
-                                currentItemName: item.name,
-                                removedBytes: reclaimedBytes
-                            )
-                        )
-
-                    case let .simctlRuntime(identifier):
-                        try await storage.deleteSimulatorRuntime(identifier: identifier)
-                        deletedCount += 1
-                        simctlDeletedCount += 1
-                        reclaimedBytes += item.sizeBytes
-                        removedItemIDs.insert(item.id)
-                        return .deleted(
-                            itemID: item.id,
-                            progress: DeletionProgress(
-                                completedCount: index + 1,
-                                totalCount: items.count,
-                                currentItemName: item.name,
-                                removedBytes: reclaimedBytes
-                            )
-                        )
-
-                    case let .notDeletable(reason):
-                        let failure = DeletionFailure(itemID: item.id, itemName: item.name, reason: reason)
-                        failures.append(failure)
-                        return .failed(
-                            failure,
-                            progress: DeletionProgress(
-                                completedCount: index + 1,
-                                totalCount: items.count,
-                                currentItemName: item.name,
-                                removedBytes: reclaimedBytes
-                            )
-                        )
                     }
+                    reclaimedBytes += item.sizeBytes
+                    return .deleted(itemID: item.id, progress: progress(completing: index))
                 } catch is CancellationError {
                     phase = .done
                     throw CancellationError()
@@ -465,26 +433,16 @@ private struct DeletionStream: AsyncSequence, Sendable {
                         reason: error.localizedDescription
                     )
                     failures.append(failure)
-                    return .failed(
-                        failure,
-                        progress: DeletionProgress(
-                            completedCount: index + 1,
-                            totalCount: items.count,
-                            currentItemName: item.name,
-                            removedBytes: reclaimedBytes
-                        )
-                    )
+                    return .failed(failure, progress: progress(completing: index))
                 }
 
             case .finish:
                 phase = .done
                 return .completed(
                     DeletionReport(
-                        deletedCount: deletedCount,
                         trashedCount: trashedCount,
                         simctlDeletedCount: simctlDeletedCount,
                         reclaimedBytes: reclaimedBytes,
-                        removedItemIDs: removedItemIDs,
                         failures: failures
                     )
                 )
