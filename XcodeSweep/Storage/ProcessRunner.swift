@@ -1,5 +1,24 @@
 import Foundation
 
+/// Runs external command-line tools such as `/usr/bin/xcrun`.
+protocol CommandRunning: Sendable {
+    func run(executableURL: URL, arguments: [String]) async throws -> CommandOutput
+}
+
+struct CommandOutput: Equatable, Sendable {
+    let stdout: Data
+    let stderr: Data
+    let terminationStatus: Int32
+
+    var stdoutString: String {
+        String(decoding: stdout, as: UTF8.self)
+    }
+
+    var stderrString: String {
+        String(decoding: stderr, as: UTF8.self)
+    }
+}
+
 enum ProcessRunnerError: LocalizedError, Sendable {
     case launchFailed(command: String, underlying: String)
     case nonZeroExit(command: String, status: Int32, stderr: String)

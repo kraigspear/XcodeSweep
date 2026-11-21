@@ -1,40 +1,82 @@
 import Foundation
 
-/// Scans CoreSimulator runtime disk images and simulator devices via `/usr/bin/xcrun simctl`.
-struct SimulatorScanner: Sendable {
-    private static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-    private let commandRunner: any CommandRunning
-    private let staleThresholdDays: Int
+extension XcodeStorage {
+    // MARK: - Scanning
 
-    init(commandRunner: any CommandRunning = ProcessRunner(), staleThresholdDays: Int = 30) {
-        self.commandRunner = commandRunner
-        self.staleThresholdDays = staleThresholdDays
-    }
-
-    func scanRuntimes() async throws -> [StorageItem] {
+    func scanSimulatorRuntimes(now: Date) async throws -> [StorageItem] {
         let output = try await commandRunner.run(
             executableURL: Self.xcrunURL,
             arguments: ["simctl", "runtime", "list", "-j"]
         )
-        return try Self.decodeRuntimes(from: output.stdout)
+        return try Self.decodeRuntimes(
+            from: output.stdout,
+            now: now,
+            thresholdDays: StalenessPolicy.simulatorRuntimesDays
+        )
     }
 
-    func scanDevices() async throws -> [StorageItem] {
+    func scanSimulatorDevices(now: Date) async throws -> [StorageItem] {
         let output = try await commandRunner.run(
             executableURL: Self.xcrunURL,
             arguments: ["simctl", "list", "devices", "-j"]
         )
         return try Self.decodeDevices(
             from: output.stdout,
-            staleThreshold: TimeInterval(staleThresholdDays) * 86400
+            now: now,
+            thresholdDays: StalenessPolicy.simulatorDevicesDays
         )
     }
 
-    // MARK: - Pure JSON Parsers
+    // MARK: - Deletion
 
-    static func decodeRuntimes(from data: Data, now: Date = Date()) throws -> [StorageItem] {
+    func deleteSimulatorDevice(udid: String, isBooted: Bool) async throws {
+        if isBooted {
+            _ = try? await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: ["simctl", "shutdown", udid]
+            )
+        }
+        _ = try await commandRunner.run(
+            executableURL: Self.xcrunURL,
+            arguments: ["simctl", "delete", udid]
+        )
+    }
+
+    func deleteSimulatorRuntime(identifier: String) async throws {
+        _ = try await commandRunner.run(
+            executableURL: Self.xcrunURL,
+            arguments: ["simctl", "runtime", "delete", identifier]
+        )
+    }
+
+    // MARK: - Shared Formatting
+
+    static func readableRuntimeName(from runtimeIdentifier: String) -> String {
+        let prefix = "com.apple.CoreSimulator.SimRuntime."
+        let stripped = runtimeIdentifier.hasPrefix(prefix)
+            ? String(runtimeIdentifier.dropFirst(prefix.count))
+            : runtimeIdentifier
+
+        let parts = stripped.split(separator: "-")
+        guard let platform = parts.first else {
+            return stripped
+        }
+        let versionParts = parts.dropFirst()
+        if versionParts.isEmpty {
+            return String(platform)
+        }
+        return "\(platform) \(versionParts.joined(separator: "."))"
+    }
+
+    // MARK: - Private JSON Decoding
+
+    private static func decodeRuntimes(
+        from data: Data,
+        now: Date,
+        thresholdDays: Int
+    ) throws -> [StorageItem] {
         let rawMap = try JSONDecoder().decode([String: SimRuntimeRecord].self, from: data)
-        let staleThreshold: TimeInterval = 45 * 86400
+        let staleThreshold = StalenessPolicy.threshold(days: thresholdDays)
 
         return rawMap.values.map { record in
             let platformName = readablePlatform(
@@ -88,12 +130,13 @@ struct SimulatorScanner: Sendable {
         .sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
-    static func decodeDevices(
+    private static func decodeDevices(
         from data: Data,
-        now: Date = Date(),
-        staleThreshold: TimeInterval = 30 * 86400
+        now: Date,
+        thresholdDays: Int
     ) throws -> [StorageItem] {
         let payload = try JSONDecoder().decode(SimDeviceListPayload.self, from: data)
+        let staleThreshold = StalenessPolicy.threshold(days: thresholdDays)
         var items: [StorageItem] = []
 
         for (runtimeKey, devices) in payload.devices {
@@ -168,9 +211,7 @@ struct SimulatorScanner: Sendable {
         return items.sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
-    // MARK: - Formatting Helpers
-
-    static func readablePlatform(from platformIdentifier: String?, runtimeIdentifier: String?) -> String {
+    private static func readablePlatform(from platformIdentifier: String?, runtimeIdentifier: String?) -> String {
         let source = (platformIdentifier ?? runtimeIdentifier ?? "").lowercased()
         if source.contains("iphone") || source.contains("ios") {
             return "iOS"
@@ -187,24 +228,7 @@ struct SimulatorScanner: Sendable {
         return "Simulator"
     }
 
-    static func readableRuntimeName(from runtimeIdentifier: String) -> String {
-        let prefix = "com.apple.CoreSimulator.SimRuntime."
-        let stripped = runtimeIdentifier.hasPrefix(prefix)
-            ? String(runtimeIdentifier.dropFirst(prefix.count))
-            : runtimeIdentifier
-
-        let components = stripped.split(separator: "-")
-        guard let platform = components.first else {
-            return stripped
-        }
-        let versionParts = components.dropFirst()
-        if versionParts.isEmpty {
-            return String(platform)
-        }
-        return "\(platform) \(versionParts.joined(separator: "."))"
-    }
-
-    static func parseISO8601(_ string: String) -> Date? {
+    private static func parseISO8601(_ string: String) -> Date? {
         let withFractional = ISO8601DateFormatter()
         withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = withFractional.date(from: string) {

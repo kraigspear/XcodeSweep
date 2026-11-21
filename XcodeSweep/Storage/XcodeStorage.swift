@@ -1,45 +1,69 @@
 import Foundation
 
-/// Live coordinator that scans all Xcode storage locations concurrently and executes safe deletions.
-struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
-    private static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+/// Snapshot returned after scanning all Xcode and CoreSimulator storage categories.
+struct ScanSnapshot: Equatable, Sendable {
+    let itemsByCategory: [StorageCategory: [StorageItem]]
+    let diskAvailableBytes: Int64?
+    let diskTotalBytes: Int64?
+    let warnings: [String]
+}
 
-    private let commandRunner: any CommandRunning
-    private let derivedDataScanner: DerivedDataScanner
-    private let simulatorScanner: SimulatorScanner
-    private let extrasScanner: XcodeExtrasScanner
+/// Deep module owning local Xcode and CoreSimulator storage inspection and safe cleanup.
+/// All external seams live strictly at the OS edges: root directory URL, command execution,
+/// file trashing, and reference clock.
+struct XcodeStorage: Sendable {
+    static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
 
-    init(
-        commandRunner: any CommandRunning = ProcessRunner(),
-        derivedDataScanner: DerivedDataScanner = DerivedDataScanner(),
-        simulatorScanner: SimulatorScanner? = nil,
-        extrasScanner: XcodeExtrasScanner = XcodeExtrasScanner()
-    ) {
-        self.commandRunner = commandRunner
-        self.derivedDataScanner = derivedDataScanner
-        self.simulatorScanner = simulatorScanner ?? SimulatorScanner(commandRunner: commandRunner)
-        self.extrasScanner = extrasScanner
+    enum StalenessPolicy {
+        static let derivedDataDays = 30
+        static let simulatorDevicesDays = 30
+        static let simulatorRuntimesDays = 45
+        static let deviceSupportDays = 45
+        static let previewsDays = 45
+
+        static func threshold(days: Int) -> TimeInterval {
+            TimeInterval(days) * 86400
+        }
     }
 
-    // MARK: - StorageScanning
+    let xcodeRootURL: URL
+    let commandRunner: any CommandRunning
+    let fileTrasher: any FileTrashing
+    let now: @Sendable () -> Date
+
+    init(
+        xcodeRootURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Developer/Xcode", isDirectory: true),
+        commandRunner: any CommandRunning = ProcessRunner(),
+        fileTrasher: any FileTrashing = LiveFileTrasher(),
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.xcodeRootURL = xcodeRootURL
+        self.commandRunner = commandRunner
+        self.fileTrasher = fileTrasher
+        self.now = now
+    }
+
+    // MARK: - Scanning
 
     func scanAll(
         onProgress: @escaping @Sendable (StorageCategory, [StorageItem]) -> Void
     ) async throws -> ScanSnapshot {
-        let capacity = Self.readVolumeCapacity()
+        let capacity = readVolumeCapacity()
+        let referenceDate = now()
 
         return await withTaskGroup(
             of: (StorageCategory, [StorageItem], String?).self,
             returning: ScanSnapshot.self
         ) { group in
             group.addTask {
-                let items = await derivedDataScanner.scan()
+                let items = await scanDerivedData(now: referenceDate)
                 return (.derivedData, items, nil)
             }
 
             group.addTask {
                 do {
-                    let items = try await simulatorScanner.scanDevices()
+                    let items = try await scanSimulatorDevices(now: referenceDate)
                     return (.simulatorDevices, items, nil)
                 } catch {
                     return (.simulatorDevices, [], "Simulator Devices: \(error.localizedDescription)")
@@ -48,7 +72,7 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
 
             group.addTask {
                 do {
-                    let items = try await simulatorScanner.scanRuntimes()
+                    let items = try await scanSimulatorRuntimes(now: referenceDate)
                     return (.simulatorRuntimes, items, nil)
                 } catch {
                     return (.simulatorRuntimes, [], "Simulator Runtimes: \(error.localizedDescription)")
@@ -56,17 +80,17 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
             }
 
             group.addTask {
-                let items = await extrasScanner.scanDeviceSupport()
+                let items = await scanDeviceSupport(now: referenceDate)
                 return (.deviceSupport, items, nil)
             }
 
             group.addTask {
-                let items = await extrasScanner.scanPreviews()
+                let items = await scanPreviews(now: referenceDate)
                 return (.previews, items, nil)
             }
 
             group.addTask {
-                let items = await extrasScanner.scanArchivesAndCaches()
+                let items = await scanArchivesAndCaches()
                 return (.archivesAndCaches, items, nil)
             }
 
@@ -90,7 +114,7 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
         }
     }
 
-    // MARK: - StorageDeleting
+    // MARK: - Deletion
 
     func delete(
         items: [StorageItem],
@@ -119,10 +143,7 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
             do {
                 switch item.deletionMethod {
                 case let .trashFile(url):
-                    try await Task.detached(priority: .userInitiated) {
-                        var resultingURL: NSURL?
-                        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
-                    }.value
+                    try await fileTrasher.trashItem(at: url)
                     deletedCount += 1
                     trashedCount += 1
                     reclaimedBytes += item.sizeBytes
@@ -130,16 +151,7 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
                     removedID = item.id
 
                 case let .simctlDevice(udid, isBooted):
-                    if isBooted {
-                        _ = try? await commandRunner.run(
-                            executableURL: Self.xcrunURL,
-                            arguments: ["simctl", "shutdown", udid]
-                        )
-                    }
-                    _ = try await commandRunner.run(
-                        executableURL: Self.xcrunURL,
-                        arguments: ["simctl", "delete", udid]
-                    )
+                    try await deleteSimulatorDevice(udid: udid, isBooted: isBooted)
                     deletedCount += 1
                     simctlDeletedCount += 1
                     reclaimedBytes += item.sizeBytes
@@ -147,10 +159,7 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
                     removedID = item.id
 
                 case let .simctlRuntime(identifier):
-                    _ = try await commandRunner.run(
-                        executableURL: Self.xcrunURL,
-                        arguments: ["simctl", "runtime", "delete", identifier]
-                    )
+                    try await deleteSimulatorRuntime(identifier: identifier)
                     deletedCount += 1
                     simctlDeletedCount += 1
                     reclaimedBytes += item.sizeBytes
@@ -191,16 +200,72 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
         )
     }
 
-    // MARK: - Disk Capacity
+    // MARK: - Shared Internal Helpers
 
-    private static func readVolumeCapacity() -> (available: Int64?, total: Int64?) {
-        let homeURL = FileManager.default.homeDirectoryForCurrentUser
-        let values = try? homeURL.resourceValues(forKeys: [
+    static func scanConcurrently<Input: Sendable>(
+        _ inputs: [Input],
+        inspect: @escaping @Sendable (Input) -> StorageItem?
+    ) async -> [StorageItem] {
+        await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
+            for input in inputs {
+                group.addTask {
+                    inspect(input)
+                }
+            }
+
+            var items: [StorageItem] = []
+            for await item in group {
+                if let item {
+                    items.append(item)
+                }
+            }
+            return items.sorted { $0.sizeBytes > $1.sizeBytes }
+        }
+    }
+
+    static func loadPlist(at url: URL) -> [String: Any]? {
+        guard let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else {
+            return nil
+        }
+        return plist
+    }
+
+    static func modificationDate(of url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    static func classifyByAge(lastUsed: Date?, now: Date, thresholdDays: Int) -> ItemStatus {
+        let threshold = StalenessPolicy.threshold(days: thresholdDays)
+        if let lastUsed, now.timeIntervalSince(lastUsed) > threshold {
+            return .stale
+        }
+        return .active
+    }
+
+    private func readVolumeCapacity() -> (available: Int64?, total: Int64?) {
+        let targetURL = nearestExistingDirectory(from: xcodeRootURL)
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        let values = try? targetURL.resourceValues(forKeys: [
             .volumeAvailableCapacityForImportantUsageKey,
             .volumeTotalCapacityKey,
         ])
         let available = values?.volumeAvailableCapacityForImportantUsage
         let total = values?.volumeTotalCapacity.map(Int64.init)
         return (available, total)
+    }
+
+    private func nearestExistingDirectory(from url: URL) -> URL? {
+        let fileManager = FileManager.default
+        var current = url
+        while !fileManager.fileExists(atPath: current.path) {
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path {
+                return nil
+            }
+            current = parent
+        }
+        return current
     }
 }

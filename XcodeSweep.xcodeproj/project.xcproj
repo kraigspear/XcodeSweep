@@ -29,15 +29,15 @@
           ],
         }, {
           "kind": "group",
-          "path": "Services",
+          "path": "Storage",
           "children": [
-            { "path": "DerivedDataScanner.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "DirectorySizer.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "LiveStorageService.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "FileTrashing.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "ProcessRunner.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "SimulatorScanner.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "StorageServiceProtocols.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "XcodeExtrasScanner.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "XcodeStorage+CoreSimulator.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "XcodeStorage+DerivedData.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "XcodeStorage+Extras.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "XcodeStorage.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
           ],
         }, {
           "kind": "group",
@@ -62,10 +62,10 @@
       "kind": "group",
       "path": "XcodeSweepTests",
       "children": [
-        { "path": "DerivedDataScannerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DirectorySizerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
-        { "path": "LiveStorageServiceTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
-        { "path": "SimulatorParserTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "ProcessRunnerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "TestSupport.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "XcodeStorageTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeSweepStoreTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
       ],
     }, {
