@@ -283,3 +283,10 @@ private struct ScanWarningsBanner: View {
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
     }
 }
+
+#if DEBUG && canImport(SwiftUI)
+    #Preview {
+        OverviewView(store: .preview())
+            .frame(width: 900, height: 760)
+    }
+#endif

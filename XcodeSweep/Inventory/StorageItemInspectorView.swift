@@ -162,3 +162,20 @@ private struct LabeledInspectorRow: View {
         }
     }
 }
+
+#if DEBUG && canImport(SwiftUI)
+    #Preview("Single item") {
+        StorageItemInspectorView(selectedItems: [StorageItem.previewItems[0]], canDelete: true, onDelete: { _ in })
+            .frame(width: 300, height: 600)
+    }
+
+    #Preview("Multiple items") {
+        StorageItemInspectorView(selectedItems: StorageItem.previewItems, canDelete: true, onDelete: { _ in })
+            .frame(width: 300, height: 600)
+    }
+
+    #Preview("No selection") {
+        StorageItemInspectorView(selectedItems: [], canDelete: true, onDelete: { _ in })
+            .frame(width: 300, height: 600)
+    }
+#endif
