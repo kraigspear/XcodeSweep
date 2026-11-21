@@ -11,7 +11,7 @@ struct DirectorySizerTests {
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
 
-        let payload = Data(repeating: 0xAB, count: 65_536)
+        let payload = Data(repeating: 0xAB, count: 65536)
         try payload.write(to: tempRoot.appendingPathComponent("file1.bin"))
         try payload.write(to: tempRoot.appendingPathComponent("file2.bin"))
 

@@ -27,12 +27,11 @@ struct DerivedDataScanner: Sendable {
 
         let candidates = entries.filter { url in
             guard url.lastPathComponent != "ModuleCache.noindex" else { return false }
-            let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            return isDir
+            return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
         let now = Date()
-        let threshold = TimeInterval(staleThresholdDays) * 86_400
+        let threshold = TimeInterval(staleThresholdDays) * 86400
 
         return await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for folderURL in candidates {
@@ -60,7 +59,7 @@ struct DerivedDataScanner: Sendable {
     static func inspectDerivedDataFolder(
         at folderURL: URL,
         now: Date = Date(),
-        staleThreshold: TimeInterval = 30 * 86_400
+        staleThreshold: TimeInterval = 30 * 86400
     ) -> StorageItem {
         let fileManager = FileManager.default
         let folderName = folderURL.lastPathComponent
@@ -129,11 +128,7 @@ struct DerivedDataScanner: Sendable {
         staleThreshold: TimeInterval,
         fileManager: FileManager = .default
     ) -> ItemStatus {
-        guard let workspacePath, !workspacePath.isEmpty else {
-            return .orphaned
-        }
-
-        guard fileManager.fileExists(atPath: workspacePath) else {
+        guard let workspacePath, !workspacePath.isEmpty, fileManager.fileExists(atPath: workspacePath) else {
             return .orphaned
         }
 
@@ -158,7 +153,9 @@ struct DerivedDataScanner: Sendable {
         var currentURL = URL(fileURLWithPath: workspacePath)
         for _ in 0 ..< 6 {
             let parent = currentURL.deletingLastPathComponent()
-            if parent.path == currentURL.path { break }
+            if parent.path == currentURL.path {
+                break
+            }
             currentURL = parent
 
             let dotGitURL = currentURL.appendingPathComponent(".git")

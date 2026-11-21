@@ -26,7 +26,7 @@ struct SimulatorScanner: Sendable {
         )
         return try Self.decodeDevices(
             from: output.stdout,
-            staleThreshold: TimeInterval(staleThresholdDays) * 86_400
+            staleThreshold: TimeInterval(staleThresholdDays) * 86400
         )
     }
 
@@ -34,10 +34,13 @@ struct SimulatorScanner: Sendable {
 
     static func decodeRuntimes(from data: Data, now: Date = Date()) throws -> [StorageItem] {
         let rawMap = try JSONDecoder().decode([String: SimRuntimeRecord].self, from: data)
-        let staleThreshold: TimeInterval = 45 * 86_400
+        let staleThreshold: TimeInterval = 45 * 86400
 
         return rawMap.values.map { record in
-            let platformName = readablePlatform(from: record.platformIdentifier, runtimeIdentifier: record.runtimeIdentifier)
+            let platformName = readablePlatform(
+                from: record.platformIdentifier,
+                runtimeIdentifier: record.runtimeIdentifier
+            )
             let lastUsedDate = record.lastUsedAt.flatMap(parseISO8601)
             let isDeletable = record.deletable ?? true
 
@@ -88,7 +91,7 @@ struct SimulatorScanner: Sendable {
     static func decodeDevices(
         from data: Data,
         now: Date = Date(),
-        staleThreshold: TimeInterval = 30 * 86_400
+        staleThreshold: TimeInterval = 30 * 86400
     ) throws -> [StorageItem] {
         let payload = try JSONDecoder().decode(SimDeviceListPayload.self, from: data)
         var items: [StorageItem] = []
@@ -128,8 +131,14 @@ struct SimulatorScanner: Sendable {
                     MetadataEntry(key: "Runtime", value: runtimeLabel),
                     MetadataEntry(key: "State", value: device.state),
                     MetadataEntry(key: "Available", value: device.isAvailable ? "Yes" : "No"),
-                    MetadataEntry(key: "Data Size", value: ByteCountFormatter.string(fromByteCount: dataSize, countStyle: .file)),
-                    MetadataEntry(key: "Log Size", value: ByteCountFormatter.string(fromByteCount: logSize, countStyle: .file)),
+                    MetadataEntry(
+                        key: "Data Size",
+                        value: ByteCountFormatter.string(fromByteCount: dataSize, countStyle: .file)
+                    ),
+                    MetadataEntry(
+                        key: "Log Size",
+                        value: ByteCountFormatter.string(fromByteCount: logSize, countStyle: .file)
+                    ),
                 ]
                 if let dataPath = device.dataPath {
                     metadata.append(MetadataEntry(key: "Data Path", value: dataPath))

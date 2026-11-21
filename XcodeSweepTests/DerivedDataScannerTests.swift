@@ -63,7 +63,7 @@ struct DerivedDataScannerTests {
         let derivedFolder = tempRoot.appendingPathComponent("OldApp-xyz", isDirectory: true)
         try FileManager.default.createDirectory(at: derivedFolder, withIntermediateDirectories: true)
 
-        let sixtyDaysAgo = Date().addingTimeInterval(-60 * 86_400)
+        let sixtyDaysAgo = Date().addingTimeInterval(-60 * 86400)
         let plist: [String: Any] = [
             "WorkspacePath": projectURL.path,
             "LastAccessedDate": sixtyDaysAgo,

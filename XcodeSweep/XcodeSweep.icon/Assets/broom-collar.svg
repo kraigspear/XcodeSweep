@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="collarGrad" gradientUnits="userSpaceOnUse" x1="471.4" y1="398.3" x2="584.6" y2="573.7">
+      <stop offset="0" stop-color="#1E8EFF"/>
+      <stop offset="1" stop-color="#0A47A6"/>
+    </linearGradient>
+  </defs>
+  <path d="M 498.55 418.73 L 600.78 495.77 C 615.77 507.07 618.77 528.38 607.47 543.38 L 605.06 546.58 C 593.76 561.57 572.44 564.57 557.45 553.27 L 455.22 476.23 C 440.23 464.93 437.23 443.62 448.53 428.62 L 450.94 425.42 C 462.24 410.43 483.56 407.43 498.55 418.73 Z" fill="url(#collarGrad)"/>
+</svg>

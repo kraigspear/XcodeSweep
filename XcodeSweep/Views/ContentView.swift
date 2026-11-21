@@ -10,12 +10,13 @@ struct ContentView: View {
             SidebarView(store: store)
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
-            DetailRouterView(store: store)
-                .overlay(alignment: .top) {
-                    if let progressText = store.deletionProgressText {
-                        DeletionProgressBanner(message: progressText)
-                    }
+            VStack(spacing: 0) {
+                if let progress = store.deletionProgress {
+                    DeletionProgressBar(progress: progress)
+                    Divider()
                 }
+                DetailRouterView(store: store)
+            }
         }
         .inspector(isPresented: $bindableStore.inspectorPresented) {
             StorageItemInspectorView(
@@ -50,7 +51,7 @@ struct ContentView: View {
         ) { pending in
             Button(pending.actionButtonTitle, role: .destructive) {
                 Task {
-                    await store.confirmPendingDeletion()
+                    await store.confirmDeletion(pending)
                 }
             }
             Button("Cancel", role: .cancel) {
@@ -112,21 +113,45 @@ private struct DetailRouterView: View {
     }
 }
 
-private struct DeletionProgressBanner: View {
-    let message: String
+private struct DeletionProgressBar: View {
+    let progress: DeletionProgress
 
     var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text(message)
-                .font(.callout)
-                .lineLimit(1)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+
+                Text(statusLine)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer()
+
+                if progress.removedBytes > 0 {
+                    Text("\(progress.removedBytes, format: .byteCount(style: .file)) removed")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("\(progress.completedCount) / \(progress.totalCount)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+
+            ProgressView(value: progress.fractionCompleted, total: 1)
+                .progressViewStyle(.linear)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.regularMaterial, in: Capsule())
-        .shadow(radius: 4)
-        .padding(.top, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private var statusLine: String {
+        if progress.currentItemName.isEmpty {
+            return "Removing items…"
+        }
+        return "Removing \(progress.currentItemName)…"
     }
 }

@@ -42,13 +42,14 @@ struct XcodeExtrasScanner: Sendable {
         }
 
         let now = Date()
-        let threshold = TimeInterval(staleThresholdDays) * 86_400
+        let threshold = TimeInterval(staleThresholdDays) * 86400
 
         return await withTaskGroup(of: StorageItem.self, returning: [StorageItem].self) { group in
             for (url, platformLabel) in candidateURLs {
                 group.addTask {
                     let size = DirectorySizer.allocatedSize(of: url)
-                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                        .contentModificationDate)
                     let status: ItemStatus = if let modified, now.timeIntervalSince(modified) > threshold {
                         .stale
                     } else {
@@ -102,13 +103,14 @@ struct XcodeExtrasScanner: Sendable {
         }
 
         let now = Date()
-        let threshold = TimeInterval(staleThresholdDays) * 86_400
+        let threshold = TimeInterval(staleThresholdDays) * 86400
 
         return await withTaskGroup(of: StorageItem.self, returning: [StorageItem].self) { group in
             for url in directories {
                 group.addTask {
                     let size = DirectorySizer.allocatedSize(of: url)
-                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                    let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                        .contentModificationDate)
                     let previewInfo = Self.parsePreviewDevicePlist(at: url.appendingPathComponent("device.plist"))
 
                     let name = previewInfo?.name ?? url.lastPathComponent
@@ -164,7 +166,8 @@ struct XcodeExtrasScanner: Sendable {
             .appendingPathComponent("DerivedData/ModuleCache.noindex", isDirectory: true)
         if fileManager.fileExists(atPath: moduleCacheURL.path) {
             let size = DirectorySizer.allocatedSize(of: moduleCacheURL)
-            let modified = (try? moduleCacheURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            let modified = (try? moduleCacheURL.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate)
             items.append(
                 StorageItem(
                     id: "cache:moduleCache",

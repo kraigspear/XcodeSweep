@@ -108,7 +108,10 @@ struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
 }
 
 struct MetadataEntry: Identifiable, Equatable, Hashable, Sendable {
-    var id: String { key }
+    var id: String {
+        key
+    }
+
     let key: String
     let value: String
 }

@@ -94,18 +94,28 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
 
     func delete(
         items: [StorageItem],
-        onProgress: @escaping @Sendable (Int, Int, String) -> Void
+        onProgress: @escaping @Sendable (DeletionProgress) async -> Void
     ) async -> DeletionReport {
         var deletedCount = 0
         var trashedCount = 0
         var simctlDeletedCount = 0
         var reclaimedBytes: Int64 = 0
+        var removedItemIDs: Set<StorageItem.ID> = []
         var failures: [DeletionFailure] = []
 
         let total = items.count
         for (index, item) in items.enumerated() {
-            onProgress(index + 1, total, item.name)
+            await onProgress(
+                DeletionProgress(
+                    completedCount: index,
+                    totalCount: total,
+                    currentItemName: item.name,
+                    removedBytes: reclaimedBytes,
+                    removedItemID: nil
+                )
+            )
 
+            var removedID: StorageItem.ID?
             do {
                 switch item.deletionMethod {
                 case let .trashFile(url):
@@ -116,6 +126,8 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
                     deletedCount += 1
                     trashedCount += 1
                     reclaimedBytes += item.sizeBytes
+                    removedItemIDs.insert(item.id)
+                    removedID = item.id
 
                 case let .simctlDevice(udid, isBooted):
                     if isBooted {
@@ -131,6 +143,8 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
                     deletedCount += 1
                     simctlDeletedCount += 1
                     reclaimedBytes += item.sizeBytes
+                    removedItemIDs.insert(item.id)
+                    removedID = item.id
 
                 case let .simctlRuntime(identifier):
                     _ = try await commandRunner.run(
@@ -140,13 +154,31 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
                     deletedCount += 1
                     simctlDeletedCount += 1
                     reclaimedBytes += item.sizeBytes
+                    removedItemIDs.insert(item.id)
+                    removedID = item.id
 
                 case let .notDeletable(reason):
-                    failures.append(DeletionFailure(itemName: item.name, reason: reason))
+                    failures.append(DeletionFailure(itemID: item.id, itemName: item.name, reason: reason))
                 }
             } catch {
-                failures.append(DeletionFailure(itemName: item.name, reason: error.localizedDescription))
+                failures.append(
+                    DeletionFailure(
+                        itemID: item.id,
+                        itemName: item.name,
+                        reason: error.localizedDescription
+                    )
+                )
             }
+
+            await onProgress(
+                DeletionProgress(
+                    completedCount: index + 1,
+                    totalCount: total,
+                    currentItemName: item.name,
+                    removedBytes: reclaimedBytes,
+                    removedItemID: removedID
+                )
+            )
         }
 
         return DeletionReport(
@@ -154,6 +186,7 @@ struct LiveStorageService: StorageScanning, StorageDeleting, Sendable {
             trashedCount: trashedCount,
             simctlDeletedCount: simctlDeletedCount,
             reclaimedBytes: reclaimedBytes,
+            removedItemIDs: removedItemIDs,
             failures: failures
         )
     }
