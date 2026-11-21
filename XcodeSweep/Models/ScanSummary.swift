@@ -8,7 +8,9 @@ struct CategoryMetrics: Identifiable, Equatable, Hashable, Sendable {
     let reclaimableCount: Int
     let reclaimableBytes: Int64
 
-    var id: StorageCategory { category }
+    var id: StorageCategory {
+        category
+    }
 }
 
 /// Snapshot of disk capacity and scanned Xcode storage totals.
@@ -42,6 +44,20 @@ struct ScanSummary: Equatable, Sendable {
     )
 }
 
+/// Live progress snapshot emitted during a batch deletion.
+struct DeletionProgress: Equatable, Sendable {
+    let completedCount: Int
+    let totalCount: Int
+    let currentItemName: String
+    let removedBytes: Int64
+    let removedItemID: StorageItem.ID?
+
+    var fractionCompleted: Double {
+        guard totalCount > 0 else { return 0 }
+        return min(1, max(0, Double(completedCount) / Double(totalCount)))
+    }
+}
+
 /// Outcome of a batch deletion operation.
 struct DeletionReport: Equatable, Identifiable, Sendable {
     let id = UUID()
@@ -49,6 +65,7 @@ struct DeletionReport: Equatable, Identifiable, Sendable {
     let trashedCount: Int
     let simctlDeletedCount: Int
     let reclaimedBytes: Int64
+    let removedItemIDs: Set<StorageItem.ID>
     let failures: [DeletionFailure]
 
     var hasFailures: Bool {
@@ -58,6 +75,7 @@ struct DeletionReport: Equatable, Identifiable, Sendable {
 
 struct DeletionFailure: Identifiable, Equatable, Sendable {
     let id = UUID()
+    let itemID: StorageItem.ID
     let itemName: String
     let reason: String
 }

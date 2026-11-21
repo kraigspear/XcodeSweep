@@ -9,7 +9,9 @@ enum ItemFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
     case unavailable
     case stale
 
-    var id: String { rawValue }
+    var id: String {
+        rawValue
+    }
 
     var title: String {
         switch self {
@@ -91,13 +93,22 @@ struct PendingDeletion: Identifiable, Equatable, Sendable {
         var parts: [String] = []
 
         if trashedCount > 0 {
-            parts.append("\(trashedCount) filesystem \(trashedCount == 1 ? "item" : "items") will be moved to Trash (reversible).")
+            parts
+                .append(
+                    "\(trashedCount) filesystem \(trashedCount == 1 ? "item" : "items") will be moved to Trash (reversible)."
+                )
         }
         if simctlCount > 0 {
-            parts.append("\(simctlCount) simulator \(simctlCount == 1 ? "item" : "items") will be permanently deleted using xcrun simctl.")
+            parts
+                .append(
+                    "\(simctlCount) simulator \(simctlCount == 1 ? "item" : "items") will be permanently deleted using xcrun simctl."
+                )
         }
         if bootedDeviceCount > 0 {
-            parts.append("\(bootedDeviceCount) booted \(bootedDeviceCount == 1 ? "simulator" : "simulators") will be shut down first.")
+            parts
+                .append(
+                    "\(bootedDeviceCount) booted \(bootedDeviceCount == 1 ? "simulator" : "simulators") will be shut down first."
+                )
         }
 
         return "Estimated space to reclaim: \(formattedSize).\n\n" + parts.joined(separator: " ")
@@ -120,24 +131,25 @@ final class XcodeSweepStore {
     }
 
     var selectedItemIDs: Set<StorageItem.ID> = []
-    var searchText: String = ""
+    var searchText = ""
     var statusFilter: ItemFilter = .all
     var sortOrder: [KeyPathComparator<StorageItem>] = [
         KeyPathComparator(\.sizeBytes, order: .reverse),
     ]
-    var inspectorPresented: Bool = true
+    var inspectorPresented = true
 
     private(set) var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
     private(set) var summary: ScanSummary = .empty
-    private(set) var isScanning: Bool = false
+    private(set) var isScanning = false
     private(set) var completedCategories: Set<StorageCategory> = []
-    private(set) var isDeleting: Bool = false
-    private(set) var deletionProgressText: String?
+    private(set) var isDeleting = false
+    private(set) var deletionProgress: DeletionProgress?
     private(set) var scanWarnings: [String] = []
     var pendingDeletion: PendingDeletion?
     var lastDeletionReport: DeletionReport?
     var errorMessage: String?
 
+    private var activeDeletionID: UUID?
     private var diskAvailableBytes: Int64?
     private var diskTotalBytes: Int64?
 
@@ -270,38 +282,54 @@ final class XcodeSweepStore {
         pendingDeletion = PendingDeletion(items: deletable)
     }
 
-    func confirmPendingDeletion() async {
-        guard let pending = pendingDeletion, !isDeleting else { return }
+    func confirmDeletion(_ pending: PendingDeletion) async {
+        guard !isDeleting, !pending.items.isEmpty else { return }
+        let deletionID = UUID()
+        activeDeletionID = deletionID
         pendingDeletion = nil
         isDeleting = true
-        deletionProgressText = "Preparing to remove \(pending.items.count) items…"
-
-        let report = await deleter.delete(items: pending.items) { [weak self] completed, total, name in
-            Task { @MainActor [weak self] in
-                self?.deletionProgressText = "Removing \(completed) of \(total): \(name)"
-            }
-        }
-
-        let failedNames = Set(report.failures.map(\.itemName))
-        let removedIDs = Set(
-            pending.items
-                .filter { !failedNames.contains($0.name) }
-                .map(\.id)
+        deletionProgress = DeletionProgress(
+            completedCount: 0,
+            totalCount: pending.items.count,
+            currentItemName: pending.items.first?.name ?? "",
+            removedBytes: 0,
+            removedItemID: nil
         )
 
-        for category in StorageCategory.allCases {
-            if var list = itemsByCategory[category] {
-                list.removeAll { removedIDs.contains($0.id) }
-                itemsByCategory[category] = list
+        let report = await deleter.delete(items: pending.items) { [weak self] progress in
+            await MainActor.run {
+                guard let self, self.activeDeletionID == deletionID else { return }
+                self.deletionProgress = progress
+                if let removedID = progress.removedItemID {
+                    self.removeItems(withIDs: [removedID])
+                }
             }
         }
 
-        selectedItemIDs.subtract(removedIDs)
-        rebuildSummary()
-
+        guard activeDeletionID == deletionID else { return }
+        removeItems(withIDs: report.removedItemIDs)
+        activeDeletionID = nil
         isDeleting = false
-        deletionProgressText = nil
+        deletionProgress = nil
         lastDeletionReport = report
+    }
+
+    private func removeItems(withIDs removedIDs: Set<StorageItem.ID>) {
+        guard !removedIDs.isEmpty else { return }
+        var changed = false
+        for category in StorageCategory.allCases {
+            guard var list = itemsByCategory[category] else { continue }
+            let beforeCount = list.count
+            list.removeAll { removedIDs.contains($0.id) }
+            if list.count != beforeCount {
+                itemsByCategory[category] = list
+                changed = true
+            }
+        }
+        selectedItemIDs.subtract(removedIDs)
+        if changed {
+            rebuildSummary()
+        }
     }
 
     // MARK: - Summary Recomputation

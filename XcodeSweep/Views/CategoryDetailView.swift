@@ -89,7 +89,7 @@ struct CategoryDetailView: View {
                 selectedCount: store.deletableSelectedItems.count,
                 selectedBytes: store.selectedTotalBytes,
                 hasPermanentDeletions: store.deletableSelectedItems.contains { $0.deletionMethod.isPermanent },
-                isDeleting: store.isDeleting,
+                deletionProgress: store.deletionProgress,
                 onSelectRecommended: { store.selectReclaimableInActiveCategory() },
                 onSelectAll: { store.selectAllDeletableInActiveCategory() },
                 onClearSelection: { store.clearSelection() },
@@ -132,9 +132,11 @@ private struct CategoryFilterBar: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                Text("\(totalVisibleCount) \(totalVisibleCount == 1 ? "item" : "items") • \(totalVisibleBytes, format: .byteCount(style: .file))")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                Text(
+                    "\(totalVisibleCount) \(totalVisibleCount == 1 ? "item" : "items") • \(totalVisibleBytes, format: .byteCount(style: .file))"
+                )
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 16)
@@ -215,23 +217,29 @@ private struct SelectionActionFooter: View {
     let selectedCount: Int
     let selectedBytes: Int64
     let hasPermanentDeletions: Bool
-    let isDeleting: Bool
+    let deletionProgress: DeletionProgress?
     let onSelectRecommended: () -> Void
     let onSelectAll: () -> Void
     let onClearSelection: () -> Void
     let onRequestDelete: () -> Void
+
+    private var isDeleting: Bool {
+        deletionProgress != nil
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Button("Select Recommended", action: onSelectRecommended)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(isDeleting)
 
             Button("Select All", action: onSelectAll)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(isDeleting)
 
-            if selectedCount > 0 {
+            if selectedCount > 0, !isDeleting {
                 Button("Clear", action: onClearSelection)
                     .buttonStyle(.borderless)
                     .controlSize(.small)
@@ -239,7 +247,15 @@ private struct SelectionActionFooter: View {
 
             Spacer()
 
-            if selectedCount > 0 {
+            if let progress = deletionProgress {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Removing \(progress.completedCount) of \(progress.totalCount)…")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            } else if selectedCount > 0 {
                 Text("\(selectedCount) selected • \(selectedBytes, format: .byteCount(style: .file))")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)

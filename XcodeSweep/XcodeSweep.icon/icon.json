@@ -1,0 +1,89 @@
+{
+  "fill-specializations": [
+    {
+      "value": {
+        "linear-gradient": [
+          "extended-srgb:0.13725,0.50588,0.94510,1.00000",
+          "extended-srgb:0.04706,0.18039,0.49412,1.00000"
+        ]
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "extended-srgb:0.04706,0.16078,0.37647,1.00000",
+          "extended-srgb:0.01569,0.05098,0.13725,1.00000"
+        ]
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "sparkles.svg",
+          "name": "sparkles"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "broom-collar.svg",
+          "name": "broom-collar"
+        },
+        {
+          "image-name": "broom-handle.svg",
+          "name": "broom-handle"
+        },
+        {
+          "image-name": "broom-bristles.svg",
+          "name": "broom-bristles"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.6
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": false,
+        "value": 0.0
+      }
+    },
+    {
+      "layers": [
+        {
+          "image-name": "storage-ring.svg",
+          "name": "storage-ring"
+        }
+      ],
+      "opacity": 0.78,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.35
+      },
+      "specular": true,
+      "translucency": {
+        "enabled": true,
+        "value": 0.55
+      }
+    }
+  ],
+  "supported-platforms": {
+    "circles": [
+      "watchOS"
+    ],
+    "squares": "shared"
+  }
+}

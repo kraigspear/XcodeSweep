@@ -38,6 +38,6 @@ struct ScanSnapshot: Equatable, Sendable {
 protocol StorageDeleting: Sendable {
     func delete(
         items: [StorageItem],
-        onProgress: @escaping @Sendable (Int, Int, String) -> Void
+        onProgress: @escaping @Sendable (DeletionProgress) async -> Void
     ) async -> DeletionReport
 }

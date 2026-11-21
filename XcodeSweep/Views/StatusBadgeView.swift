@@ -36,16 +36,16 @@ struct StatusBadgeView: View {
 }
 
 #if DEBUG && canImport(SwiftUI)
-#Preview {
-    HStack {
-        StatusBadgeView(status: .orphaned)
-        StatusBadgeView(status: .worktree)
-        StatusBadgeView(status: .unavailable)
-        StatusBadgeView(status: .booted)
-        StatusBadgeView(status: .stale)
-        StatusBadgeView(status: .active)
-        StatusBadgeView(status: .systemManaged)
+    #Preview {
+        HStack {
+            StatusBadgeView(status: .orphaned)
+            StatusBadgeView(status: .worktree)
+            StatusBadgeView(status: .unavailable)
+            StatusBadgeView(status: .booted)
+            StatusBadgeView(status: .stale)
+            StatusBadgeView(status: .active)
+            StatusBadgeView(status: .systemManaged)
+        }
+        .padding()
     }
-    .padding()
-}
 #endif

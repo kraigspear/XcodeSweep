@@ -9,7 +9,9 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
     case previews
     case archivesAndCaches
 
-    var id: String { rawValue }
+    var id: String {
+        rawValue
+    }
 
     var title: String {
         switch self {
