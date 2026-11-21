@@ -463,6 +463,83 @@ struct XcodeSweepStoreTests {
         #expect(store.inventory.items(in: .derivedData).isEmpty)
     }
 
+    /// Verifies switching sidebar destinations starts the new one with no leftover filter, search, or selection.
+    /// To replicate: in DerivedData choose Unused, type a search, select a row → click Simulator Devices.
+    @Test("Navigating to another destination resets category state")
+    func navigate_toDifferentDestination_resetsFilterSearchAndSelection() async throws {
+        let (store, fixture) = try await makeScannedStore()
+        defer { fixture.cleanup() }
+        store.navigate(to: .category(.derivedData))
+        store.statusFilter = .stale
+        store.searchText = "Sample"
+        store.selectedItemIDs = Set(store.inventory.items(in: .derivedData).map(\.id))
+
+        store.navigate(to: .category(.simulatorDevices))
+
+        #expect(store.sidebarSelection == .category(.simulatorDevices))
+        #expect(store.statusFilter == .all)
+        #expect(store.searchText.isEmpty)
+        #expect(store.selectedItemIDs.isEmpty)
+    }
+
+    /// Verifies re-selecting the current destination keeps the user's filter, search, and selection.
+    /// To replicate: in DerivedData choose Unused and select a row → click DerivedData in the sidebar again.
+    @Test("Navigating to the current destination keeps category state")
+    func navigate_toSameDestination_keepsFilterSearchAndSelection() async throws {
+        let (store, fixture) = try await makeScannedStore()
+        defer { fixture.cleanup() }
+        store.navigate(to: .category(.derivedData))
+        store.statusFilter = .stale
+        store.searchText = "Sample"
+        let selection = Set(store.inventory.items(in: .derivedData).map(\.id))
+        store.selectedItemIDs = selection
+
+        store.navigate(to: .category(.derivedData))
+
+        #expect(store.statusFilter == .stale)
+        #expect(store.searchText == "Sample")
+        #expect(store.selectedItemIDs == selection)
+    }
+
+    /// Verifies "Review Cleanable" lands on the category with Recommended applied, no stale search, and candidates
+    /// selected.
+    /// To replicate: in Simulator Devices type a search → go to Overview → click "Review N Cleanable" on DerivedData.
+    @Test("Opening a category for cleanup applies Recommended and selects candidates")
+    func openCategoryAndSelectReclaimable_fromAnotherCategory_appliesRecommendedAndSelects() async throws {
+        let (store, fixture) = try await makeScannedStore()
+        defer { fixture.cleanup() }
+        store.navigate(to: .category(.simulatorDevices))
+        store.searchText = "iPhone"
+
+        store.openCategoryAndSelectReclaimable(.derivedData)
+
+        let candidates = store.inventory.items(in: .derivedData).filter(\.isReclaimableCandidate)
+        #expect(!candidates.isEmpty)
+        #expect(store.sidebarSelection == .category(.derivedData))
+        #expect(store.statusFilter == .reclaimable)
+        #expect(store.searchText.isEmpty)
+        #expect(store.selectedItemIDs == Set(candidates.map(\.id)))
+    }
+
+    private func makeScannedStore() async throws -> (XcodeSweepStore, TempXcodeFixture) {
+        let fixture = try TempXcodeFixture()
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        _ = try fixture.addDerivedData(
+            folderName: "SampleApp-old",
+            workspacePath: "/nonexistent/SampleApp-old.xcodeproj",
+            lastAccessed: now
+        )
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+        await store.refresh()
+        return (store, fixture)
+    }
+
     private func answerSimctl(_ controller: ControllableCommandRunner) async throws {
         for _ in 0 ..< 2 {
             let call = try await controller.nextPendingCall()

@@ -26,7 +26,7 @@ struct OverviewView: View {
                     metrics: store.inventory.categoryMetrics,
                     isCategoryScanning: { store.isCategoryScanning($0) },
                     onOpenCategory: { category in
-                        store.sidebarSelection = .category(category)
+                        store.navigate(to: .category(category))
                     },
                     onSelectReclaimable: { category in
                         store.openCategoryAndSelectReclaimable(category)
