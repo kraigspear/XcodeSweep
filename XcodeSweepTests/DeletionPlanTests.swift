@@ -94,11 +94,9 @@ struct DeletionPlanTests {
     func reportSummary_withManyFailures_capsListedFailures() {
         let failures = (1 ... 6).map { DeletionFailure(itemID: "f\($0)", itemName: "Item \($0)", reason: "Busy") }
         let report = DeletionReport(
-            deletedCount: 3,
             trashedCount: 2,
             simctlDeletedCount: 1,
             reclaimedBytes: 0,
-            removedItemIDs: [],
             failures: failures
         )
 

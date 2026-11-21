@@ -301,7 +301,7 @@ struct XcodeStorageTests {
             .sorted { $0.name < $1.name }
 
         var events: [DeletionEvent] = []
-        for try await event in storage.delete(items: items) {
+        for try await event in storage.delete(DeletionPlan(selection: items)) {
             events.append(event)
         }
 
@@ -329,7 +329,6 @@ struct XcodeStorageTests {
         #expect(report.deletedCount == 1)
         #expect(report.trashedCount == 1)
         #expect(report.simctlDeletedCount == 0)
-        #expect(report.removedItemIDs == ["derivedData:\(goodURL.path)"])
         #expect(report.failures.map(\.itemID) == ["derivedData:\(badURL.path)"])
     }
 
@@ -386,7 +385,11 @@ struct XcodeStorageTests {
 
         let recorder = EventRecorder<DeletionEvent>()
         let deletionTask = Task {
-            for try await event in storage.delete(items: [bootedDevice, failingRuntime, protectedRuntime]) {
+            for try await event in storage.delete(DeletionPlan(selection: [
+                bootedDevice,
+                failingRuntime,
+                protectedRuntime,
+            ])) {
                 await recorder.append(event)
             }
         }
@@ -400,7 +403,7 @@ struct XcodeStorageTests {
             .starting(
                 DeletionProgress(
                     completedCount: 0,
-                    totalCount: 3,
+                    totalCount: 2,
                     currentItemName: "iPhone 17 Pro",
                     removedBytes: 0
                 )
@@ -425,13 +428,13 @@ struct XcodeStorageTests {
         let eventsBeforeFailureResolves = await recorder.snapshot()
         #expect(eventsBeforeFailureResolves == [
             .starting(
-                DeletionProgress(completedCount: 0, totalCount: 3, currentItemName: "iPhone 17 Pro", removedBytes: 0)
+                DeletionProgress(completedCount: 0, totalCount: 2, currentItemName: "iPhone 17 Pro", removedBytes: 0)
             ),
             .deleted(
                 itemID: "sim-1",
                 progress: DeletionProgress(
                     completedCount: 1,
-                    totalCount: 3,
+                    totalCount: 2,
                     currentItemName: "iPhone 17 Pro",
                     removedBytes: 4_000_000_000
                 )
@@ -439,7 +442,7 @@ struct XcodeStorageTests {
             .starting(
                 DeletionProgress(
                     completedCount: 1,
-                    totalCount: 3,
+                    totalCount: 2,
                     currentItemName: "iOS 26.4",
                     removedBytes: 4_000_000_000
                 )
@@ -454,23 +457,21 @@ struct XcodeStorageTests {
         try await deletionTask.value
         let allEvents = await recorder.snapshot()
 
-        #expect(allEvents.count == 7)
+        // The protected runtime never reaches deletion: DeletionPlan sets it aside.
+        #expect(allEvents.count == 5)
         guard case let .failed(runtimeFailure, _) = allEvents[3],
-              case let .failed(protectedFailure, _) = allEvents[5],
-              case let .completed(report) = allEvents[6]
+              case let .completed(report) = allEvents[4]
         else {
             Issue.record("Unexpected tail events: \(allEvents)")
             return
         }
 
         #expect(runtimeFailure.itemID == "rt-2")
-        #expect(protectedFailure.itemID == "rt-3")
         #expect(report.deletedCount == 1)
         #expect(report.trashedCount == 0)
         #expect(report.simctlDeletedCount == 1)
         #expect(report.reclaimedBytes == 4_000_000_000)
-        #expect(report.removedItemIDs == ["sim-1"])
-        #expect(report.failures.map(\.itemID) == ["rt-2", "rt-3"])
+        #expect(report.failures.map(\.itemID) == ["rt-2"])
     }
 
     @Test(
@@ -514,7 +515,7 @@ struct XcodeStorageTests {
 
         let recorder = EventRecorder<DeletionEvent>()
         let deleteTask = Task {
-            for try await event in storage.delete(items: [bootedDevice, trailingFile]) {
+            for try await event in storage.delete(DeletionPlan(selection: [bootedDevice, trailingFile])) {
                 await recorder.append(event)
             }
         }
@@ -568,7 +569,7 @@ struct XcodeStorageTests {
         )
 
         let deleteTask = Task {
-            for try await _ in storage.delete(items: [bootedDevice]) {}
+            for try await _ in storage.delete(DeletionPlan(selection: [bootedDevice])) {}
         }
         defer { deleteTask.cancel() }
 
@@ -612,7 +613,7 @@ struct XcodeStorageTests {
         let proceedAfterCancel = AsyncSignal()
 
         let deleteTask = Task {
-            var iterator = storage.delete(items: [item]).makeAsyncIterator()
+            var iterator = storage.delete(DeletionPlan(selection: [item])).makeAsyncIterator()
             let first = try await iterator.next()
             #expect(first == .starting(
                 DeletionProgress(completedCount: 0, totalCount: 1, currentItemName: "SampleApp", removedBytes: 0)

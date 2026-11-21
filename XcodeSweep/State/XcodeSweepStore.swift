@@ -238,7 +238,7 @@ final class XcodeSweepStore {
         defer { operation = .idle }
 
         do {
-            for try await event in xcodeStorage.delete(items: plan.deletableItems) {
+            for try await event in xcodeStorage.delete(plan) {
                 switch event {
                 case let .starting(progress):
                     operation = .deleting(progress)
