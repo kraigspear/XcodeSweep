@@ -19,19 +19,14 @@ extension XcodeStorage {
             return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
-        let threshold = StalenessPolicy.threshold(days: StalenessPolicy.derivedDataDays)
         return await Self.scanConcurrently(candidates) { folderURL in
-            Self.inspectDerivedDataFolder(at: folderURL, now: now, staleThreshold: threshold)
+            Self.inspectDerivedDataFolder(at: folderURL, now: now)
         }
     }
 
     // MARK: - Private Inspection
 
-    private static func inspectDerivedDataFolder(
-        at folderURL: URL,
-        now: Date,
-        staleThreshold: TimeInterval
-    ) -> StorageItem {
+    private static func inspectDerivedDataFolder(at folderURL: URL, now: Date) -> StorageItem {
         let fileManager = FileManager.default
         let folderName = folderURL.lastPathComponent
         let plist = loadPlist(at: folderURL.appendingPathComponent("info.plist"))
@@ -44,7 +39,6 @@ extension XcodeStorage {
             workspacePath: workspacePath,
             lastAccessed: lastAccessed,
             now: now,
-            staleThreshold: staleThreshold,
             fileManager: fileManager
         )
 
@@ -82,7 +76,6 @@ extension XcodeStorage {
         workspacePath: String?,
         lastAccessed: Date?,
         now: Date,
-        staleThreshold: TimeInterval,
         fileManager: FileManager
     ) -> ItemStatus {
         guard let workspacePath, !workspacePath.isEmpty, fileManager.fileExists(atPath: workspacePath) else {
@@ -93,11 +86,7 @@ extension XcodeStorage {
             return .worktree
         }
 
-        if let lastAccessed, now.timeIntervalSince(lastAccessed) > staleThreshold {
-            return .stale
-        }
-
-        return .active
+        return StorageCategory.derivedData.ageStatus(lastUsed: lastAccessed, now: now)
     }
 
     /// Detects git worktrees either by path convention or by finding a `.git` file (worktree pointer) walking upward.

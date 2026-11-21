@@ -29,18 +29,6 @@ enum DeletionEvent: Equatable, Sendable {
 struct XcodeStorage: Sendable {
     static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
 
-    enum StalenessPolicy {
-        static let derivedDataDays = 30
-        static let simulatorDevicesDays = 30
-        static let simulatorRuntimesDays = 45
-        static let deviceSupportDays = 45
-        static let previewsDays = 45
-
-        static func threshold(days: Int) -> TimeInterval {
-            TimeInterval(days) * 86400
-        }
-    }
-
     let xcodeRootURL: URL
     let commandRunner: any CommandRunning
     let fileTrasher: any FileTrashing
@@ -131,14 +119,6 @@ struct XcodeStorage: Sendable {
 
     static func modificationDate(of url: URL) -> Date? {
         try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
-    }
-
-    static func classifyByAge(lastUsed: Date?, now: Date, thresholdDays: Int) -> ItemStatus {
-        let threshold = StalenessPolicy.threshold(days: thresholdDays)
-        if let lastUsed, now.timeIntervalSince(lastUsed) > threshold {
-            return .stale
-        }
-        return .active
     }
 
     fileprivate func readVolumeCapacity() -> (available: Int64?, total: Int64?) {

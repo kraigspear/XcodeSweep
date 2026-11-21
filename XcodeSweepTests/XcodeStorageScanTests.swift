@@ -244,6 +244,13 @@ struct XcodeStorageScanTests {
         #expect(extrasByName["ModuleCache.noindex"]?.status == .stale)
         #expect(extrasByName["ReleaseApp"]?.status == .active)
         #expect(extrasByName["ReleaseApp"]?.subtitle == "v2.4.0 (42)")
+
+        // Every status a scanner assigned must be one its category declares, so filters can't drift from scanners.
+        for (category, items) in snapshot.itemsByCategory {
+            for item in items {
+                #expect(category.possibleStatuses.contains(item.status), "\(category): \(item.name) is \(item.status)")
+            }
+        }
     }
 
     @Test("Records warnings instead of failing scan when simctl fails")

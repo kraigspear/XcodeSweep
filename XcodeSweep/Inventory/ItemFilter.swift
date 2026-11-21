@@ -24,20 +24,25 @@ enum ItemFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
         }
     }
 
+    /// The single status this filter selects; `nil` for filters that aren't one status.
+    var status: ItemStatus? {
+        switch self {
+        case .all, .reclaimable: nil
+        case .orphaned: .orphaned
+        case .worktree: .worktree
+        case .unavailable: .unavailable
+        case .stale: .stale
+        }
+    }
+
     func matches(_ item: StorageItem) -> Bool {
         switch self {
         case .all:
             true
         case .reclaimable:
             item.isReclaimableCandidate
-        case .orphaned:
-            item.status == .orphaned
-        case .worktree:
-            item.status == .worktree
-        case .unavailable:
-            item.status == .unavailable
-        case .stale:
-            item.status == .stale
+        case .orphaned, .worktree, .unavailable, .stale:
+            item.status == status
         }
     }
 }
