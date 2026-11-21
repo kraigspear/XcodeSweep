@@ -11,7 +11,7 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 320)
         } detail: {
             VStack(spacing: 0) {
-                if let progress = store.deletionProgress {
+                if let progress = store.operation.deletionProgress {
                     DeletionProgressBar(progress: progress)
                     Divider()
                 }
@@ -21,7 +21,7 @@ struct ContentView: View {
         .inspector(isPresented: $bindableStore.inspectorPresented) {
             StorageItemInspectorView(
                 selectedItems: store.selectedItems,
-                canDelete: store.canDelete,
+                canDelete: !store.operation.isBusy,
                 onDelete: { store.requestDelete(items: $0) }
             )
             .inspectorColumnWidth(min: 250, ideal: 300, max: 400)
@@ -35,7 +35,7 @@ struct ContentView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(!store.canRefresh)
+                .disabled(store.operation.isBusy)
                 .help("Rescan Xcode storage (⌘R)")
 
                 Button {

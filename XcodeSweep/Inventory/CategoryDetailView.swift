@@ -15,7 +15,7 @@ struct CategoryDetailView: View {
                 selectedFilter: $bindableStore.statusFilter,
                 totalVisibleCount: visibleItems.count,
                 totalVisibleBytes: visibleItems.reduce(0) { $0 + $1.sizeBytes },
-                isScanning: store.isCategoryScanning(category)
+                isScanning: store.operation.isScanning(category)
             )
 
             Divider()
@@ -23,7 +23,7 @@ struct CategoryDetailView: View {
             if visibleItems.isEmpty {
                 CategoryEmptyStateView(
                     category: category,
-                    isScanning: store.isCategoryScanning(category),
+                    isScanning: store.operation.isScanning(category),
                     hasActiveFilter: store.statusFilter != .all || !store.searchText.isEmpty,
                     onResetFilters: {
                         store.statusFilter = .all
@@ -78,7 +78,7 @@ struct CategoryDetailView: View {
                     let targetItems = visibleItems.filter { selectedIDs.contains($0.id) }
                     ItemContextMenuContent(
                         items: targetItems,
-                        canDelete: store.canDelete,
+                        canDelete: !store.operation.isBusy,
                         onDelete: { store.requestDelete(items: targetItems) }
                     )
                 }
