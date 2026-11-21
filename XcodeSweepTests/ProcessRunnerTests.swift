@@ -50,4 +50,30 @@ struct ProcessRunnerTests {
             Issue.record("Unexpected error: \(error)")
         }
     }
+
+    @Test(
+        "Terminates child process promptly and throws CancellationError on task cancellation",
+        .timeLimit(.minutes(1))
+    )
+    func terminatesChildProcessOnCancellation() async throws {
+        let runner = ProcessRunner()
+        let start = ContinuousClock.now
+
+        let task = Task {
+            try await runner.run(
+                executableURL: URL(fileURLWithPath: "/bin/sleep"),
+                arguments: ["30"]
+            )
+        }
+
+        try await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await task.value
+        }
+
+        let elapsed = ContinuousClock.now - start
+        #expect(elapsed < .seconds(5))
+    }
 }
