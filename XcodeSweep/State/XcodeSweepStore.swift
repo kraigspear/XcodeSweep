@@ -152,6 +152,9 @@ final class XcodeSweepStore {
     private var activeDeletionID: UUID?
     private var diskAvailableBytes: Int64?
     private var diskTotalBytes: Int64?
+    private var lastScanCompletedAt: Date = .distantPast
+    /// Items deleted while a scan runs, kept out of the result a cancelled scan rolls back to.
+    private var itemIDsDeletedDuringScan: Set<StorageItem.ID> = []
 
     private let xcodeStorage: XcodeStorage
 
@@ -166,20 +169,23 @@ final class XcodeSweepStore {
     func refresh() async {
         guard !isScanning, !isDeleting else { return }
 
+        let completedItems = itemsByCategory
+        let completedWarnings = scanWarnings
+        let completedCategoriesBeforeScan = completedCategories
+
         isScanning = true
+        itemIDsDeletedDuringScan = []
         completedCategories = []
         scanWarnings = []
         errorMessage = nil
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            itemIDsDeletedDuringScan = []
+        }
 
         do {
             let snapshot = try await xcodeStorage.scanAll { [weak self] category, items in
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.itemsByCategory[category] = items
-                    self.completedCategories.insert(category)
-                    self.rebuildSummary()
-                }
+                await self?.applyScanProgress(category, items)
             }
 
             itemsByCategory = snapshot.itemsByCategory
@@ -187,11 +193,25 @@ final class XcodeSweepStore {
             diskTotalBytes = snapshot.diskTotalBytes
             scanWarnings = snapshot.warnings
             completedCategories = Set(StorageCategory.allCases)
+            lastScanCompletedAt = Date()
             pruneStaleSelection()
+            rebuildSummary()
+        } catch is CancellationError {
+            // Interrupted, not failed: restore the last completed result and report nothing.
+            itemsByCategory = completedItems
+            scanWarnings = completedWarnings
+            completedCategories = completedCategoriesBeforeScan
+            removeItems(withIDs: itemIDsDeletedDuringScan)
             rebuildSummary()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func applyScanProgress(_ category: StorageCategory, _ items: [StorageItem]) {
+        itemsByCategory[category] = items
+        completedCategories.insert(category)
+        rebuildSummary()
     }
 
     // MARK: - Querying
@@ -311,6 +331,9 @@ final class XcodeSweepStore {
 
     private func removeItems(withIDs removedIDs: Set<StorageItem.ID>) {
         guard !removedIDs.isEmpty else { return }
+        if isScanning {
+            itemIDsDeletedDuringScan.formUnion(removedIDs)
+        }
         var changed = false
         for category in StorageCategory.allCases {
             guard var list = itemsByCategory[category] else { continue }
@@ -368,7 +391,7 @@ final class XcodeSweepStore {
         }
 
         summary = ScanSummary(
-            scannedAt: Date(),
+            scannedAt: lastScanCompletedAt,
             totalBytes: totalBytes,
             reclaimableBytes: reclaimableBytes,
             totalItemCount: totalCount,

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import XcodeSweep
 
@@ -468,6 +469,61 @@ struct XcodeStorageTests {
         let report = await outerTask.value
         #expect(report.deletedCount == 0)
         #expect(report.failures.map(\.itemID) == ["sim-extra"])
+    }
+
+    @Test(
+        "Throws CancellationError and reports no simulator progress when cancelled during simctl",
+        .timeLimit(.minutes(1))
+    )
+    func scanCancelledDuringSimctlThrowsWithoutSimulatorProgress() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher()
+        )
+        let reportedCategories = OSAllocatedUnfairLock<[StorageCategory]>(initialState: [])
+
+        let scanTask = Task {
+            try await storage.scanAll { category, _ in
+                reportedCategories.withLock { $0.append(category) }
+            }
+        }
+        defer { scanTask.cancel() }
+
+        _ = try await controller.nextPendingCall()
+        _ = try await controller.nextPendingCall()
+        scanTask.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await scanTask.value
+        }
+        let reported = reportedCategories.withLock { $0 }
+        #expect(!reported.contains(.simulatorDevices))
+        #expect(!reported.contains(.simulatorRuntimes))
+    }
+
+    @Test("Finishes delivering every progress update before returning")
+    func scanAwaitsProgressDelivery() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher()
+        )
+        let deliveredCategories = OSAllocatedUnfairLock<Set<StorageCategory>>(initialState: [])
+
+        _ = try await storage.scanAll { category, _ in
+            try? await Task.sleep(for: .milliseconds(20))
+            deliveredCategories.withLock { _ = $0.insert(category) }
+        }
+
+        #expect(deliveredCategories.withLock { $0 } == Set(StorageCategory.allCases))
     }
 
     // MARK: - Test Adapter Waiters

@@ -274,4 +274,151 @@ struct XcodeSweepStoreTests {
         #expect(store.deletionProgress == nil)
         #expect(store.items(for: .derivedData).map(\.id) == [item.id])
     }
+
+    @Test(
+        "A cancelled scan leaves the store unscanned so the next appearance scans again",
+        .timeLimit(.minutes(1))
+    )
+    func cancelledScanLeavesStoreUnscanned() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher()
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+
+        // Given: a refresh parked on both simctl commands
+        let refreshTask = Task { await store.refresh() }
+        _ = try await controller.nextPendingCall()
+        _ = try await controller.nextPendingCall()
+
+        // When
+        refreshTask.cancel()
+        await refreshTask.value
+        try await Task.sleep(for: .milliseconds(50)) // let queued progress updates land
+
+        // Then
+        #expect(store.summary.scannedAt == .distantPast)
+        #expect(store.errorMessage == nil)
+        #expect(store.scanWarnings.isEmpty)
+        #expect(!store.isScanning)
+    }
+
+    @Test(
+        "A cancelled rescan restores the last completed result, including warnings and totals",
+        .timeLimit(.minutes(1))
+    )
+    func cancelledRescanRestoresLastCompletedResult() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher()
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+        try fixture.addDerivedData(
+            folderName: "Kept-1",
+            workspacePath: "/nonexistent/Kept.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+
+        // Given: a completed scan with one DerivedData item and a runtime warning
+        let firstScan = Task { await store.refresh() }
+        for _ in 0 ..< 2 {
+            let call = try await controller.nextPendingCall()
+            if call.arguments.contains("devices") {
+                await controller.resumeCall(id: call.id, with: .success(
+                    CommandOutput(stdout: Data(#"{"devices":{}}"#.utf8), stderr: Data(), terminationStatus: 0)
+                ))
+            } else {
+                await controller.resumeCall(id: call.id, with: .failure(TestTrashError(message: "runtime list failed")))
+            }
+        }
+        await firstScan.value
+        let completedSummary = store.summary
+        let completedWarnings = store.scanWarnings
+        #expect(completedWarnings.count == 1)
+
+        // When: DerivedData changes, the rescan reports it, then the rescan is cancelled
+        try fixture.addDerivedData(
+            folderName: "Added-2",
+            workspacePath: "/nonexistent/Added.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+        let rescan = Task { await store.refresh() }
+        _ = try await controller.nextPendingCall()
+        _ = try await controller.nextPendingCall()
+        try await waitUntil("rescan reported new DerivedData") {
+            await store.items(for: .derivedData).count == 2
+        }
+        rescan.cancel()
+        await rescan.value
+        try await Task.sleep(for: .milliseconds(50)) // let queued progress updates land
+
+        // Then
+        #expect(store.items(for: .derivedData).map(\.name) == ["Kept"])
+        #expect(store.summary == completedSummary)
+        #expect(store.scanWarnings == completedWarnings)
+        #expect(store.completedCategories == Set(StorageCategory.allCases))
+    }
+
+    @Test(
+        "A cancelled rescan does not bring back an item deleted while it ran",
+        .timeLimit(.minutes(1))
+    )
+    func cancelledRescanKeepsDeletionsMadeDuringScan() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let trasher = RecordingFileTrasher()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: trasher
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+        try fixture.addDerivedData(
+            folderName: "Doomed-1",
+            workspacePath: "/nonexistent/Doomed.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+
+        // Given: a completed scan, then a rescan parked on simctl
+        let firstScan = Task { await store.refresh() }
+        try await answerSimctl(controller)
+        await firstScan.value
+        let doomed = try #require(store.items(for: .derivedData).first)
+
+        let rescan = Task { await store.refresh() }
+        _ = try await controller.nextPendingCall()
+        _ = try await controller.nextPendingCall()
+
+        // When: the item is deleted mid-scan, then the rescan is cancelled
+        await store.confirmDeletion(PendingDeletion(items: [doomed]))
+        #expect(try await trasher.trashedURLs == [#require(doomed.path)])
+        rescan.cancel()
+        await rescan.value
+
+        // Then
+        #expect(store.items(for: .derivedData).isEmpty)
+        #expect(store.summary.totalItemCount == 0)
+    }
+
+    private func answerSimctl(_ controller: ControllableCommandRunner) async throws {
+        for _ in 0 ..< 2 {
+            let call = try await controller.nextPendingCall()
+            let json = call.arguments.contains("devices") ? #"{"devices":{}}"# : "{}"
+            await controller.resumeCall(id: call.id, with: .success(
+                CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
+            ))
+        }
+    }
 }
