@@ -463,6 +463,17 @@ struct XcodeSweepStoreTests {
         #expect(store.inventory.items(in: .derivedData).isEmpty)
     }
 
+    /// Verifies the store reports idle, not scanning, once a scan finishes.
+    /// To replicate: open Overview → press ⌘R → "Scanning…" changes to the scanned item count.
+    @Test("Scanning state clears after a completed scan")
+    func refresh_afterCompletion_isNotScanning() async throws {
+        let (store, fixture) = try await makeScannedStore()
+        defer { fixture.cleanup() }
+
+        #expect(!store.isScanning)
+        #expect(store.operation == .idle)
+    }
+
     /// Verifies switching sidebar destinations starts the new one with no leftover filter, search, or selection.
     /// To replicate: in DerivedData choose Unused, type a search, select a row → click Simulator Devices.
     @Test("Navigating to another destination resets category state")
