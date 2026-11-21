@@ -47,6 +47,18 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
+    /// Status filters worth offering; statuses a category never produces are left out.
+    var availableFilters: [ItemFilter] {
+        switch self {
+        case .derivedData:
+            [.all, .reclaimable, .orphaned, .worktree, .stale]
+        case .simulatorDevices:
+            [.all, .reclaimable, .unavailable, .stale]
+        case .simulatorRuntimes, .deviceSupport, .previews, .archivesAndCaches:
+            [.all, .reclaimable, .stale]
+        }
+    }
+
     var summaryDescription: String {
         switch self {
         case .derivedData:

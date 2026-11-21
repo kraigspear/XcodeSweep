@@ -490,3 +490,28 @@ func testISO8601Date(_ string: String) -> Date {
     }
     return date
 }
+
+func makeStorageItem(
+    id: String,
+    category: StorageCategory = .derivedData,
+    name: String? = nil,
+    subtitle: String = "",
+    workspacePath: String? = nil,
+    sizeBytes: Int64 = 1,
+    status: ItemStatus = .stale,
+    method: DeletionMethod = .trashFile(URL(filePath: "/tmp/item"))
+) -> StorageItem {
+    StorageItem(
+        id: id,
+        category: category,
+        name: name ?? id,
+        subtitle: subtitle,
+        sizeBytes: sizeBytes,
+        lastUsedDate: nil,
+        path: nil,
+        workspacePath: workspacePath,
+        status: status,
+        deletionMethod: method,
+        metadata: []
+    )
+}

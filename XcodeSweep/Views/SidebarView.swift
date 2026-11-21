@@ -9,14 +9,14 @@ struct SidebarView: View {
         List(selection: $bindableStore.sidebarSelection) {
             Section {
                 SidebarOverviewRow(
-                    totalBytes: store.summary.totalBytes,
+                    totalBytes: store.inventory.totalBytes,
                     isScanning: store.isScanning
                 )
                 .tag(SidebarSelection.overview)
             }
 
             Section("Xcode Storage") {
-                ForEach(store.summary.categoryMetrics) { metrics in
+                ForEach(store.inventory.categoryMetrics) { metrics in
                     SidebarCategoryRow(
                         metrics: metrics,
                         isScanning: store.isCategoryScanning(metrics.category)
@@ -28,8 +28,8 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
             DiskFooterView(
-                availableBytes: store.summary.diskAvailableBytes,
-                totalBytes: store.summary.diskTotalBytes
+                availableBytes: store.inventory.diskAvailableBytes,
+                totalBytes: store.inventory.diskTotalBytes
             )
         }
     }

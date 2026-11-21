@@ -1,58 +1,6 @@
 import Foundation
 import Observation
 
-enum ItemFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
-    case all
-    case reclaimable
-    case orphaned
-    case worktree
-    case unavailable
-    case stale
-
-    var id: String {
-        rawValue
-    }
-
-    var title: String {
-        switch self {
-        case .all: "All"
-        case .reclaimable: "Recommended"
-        case .orphaned: "Orphaned"
-        case .worktree: "Worktrees"
-        case .unavailable: "Unavailable"
-        case .stale: "Unused"
-        }
-    }
-
-    static func filters(for category: StorageCategory) -> [ItemFilter] {
-        switch category {
-        case .derivedData:
-            [.all, .reclaimable, .orphaned, .worktree, .stale]
-        case .simulatorDevices:
-            [.all, .reclaimable, .unavailable, .stale]
-        case .simulatorRuntimes, .deviceSupport, .previews, .archivesAndCaches:
-            [.all, .reclaimable, .stale]
-        }
-    }
-
-    func matches(_ item: StorageItem) -> Bool {
-        switch self {
-        case .all:
-            true
-        case .reclaimable:
-            item.isReclaimableCandidate
-        case .orphaned:
-            item.status == .orphaned
-        case .worktree:
-            item.status == .worktree
-        case .unavailable:
-            item.status == .unavailable
-        case .stale:
-            item.status == .stale
-        }
-    }
-}
-
 /// Single mutually-exclusive lifecycle state for `XcodeSweepStore`.
 enum OperationState: Equatable, Sendable {
     case idle
@@ -119,16 +67,11 @@ final class XcodeSweepStore {
     var inspectorPresented = true
 
     private(set) var operation: OperationState = .idle
-    private(set) var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
-    private(set) var summary: ScanSummary = .empty
+    private(set) var inventory: StorageInventory = .empty
     private(set) var scanWarnings: [String] = []
     var pendingDeletion: DeletionPlan?
     var lastDeletionReport: DeletionReport?
     var errorMessage: String?
-
-    private var diskAvailableBytes: Int64?
-    private var diskTotalBytes: Int64?
-    private var lastScanCompletedAt: Date?
 
     private let xcodeStorage: XcodeStorage
 
@@ -151,7 +94,7 @@ final class XcodeSweepStore {
     }
 
     var hasCompletedScan: Bool {
-        summary.scannedAt != nil
+        inventory.scannedAt != nil
     }
 
     var deletionProgress: DeletionProgress? {
@@ -183,7 +126,7 @@ final class XcodeSweepStore {
     func refresh() async {
         guard canRefresh else { return }
 
-        let previousItems = itemsByCategory
+        let previousInventory = inventory
         let previousWarnings = scanWarnings
 
         pendingDeletion = nil
@@ -197,54 +140,32 @@ final class XcodeSweepStore {
             for try await event in xcodeStorage.scan() {
                 switch event {
                 case let .categoryScanned(category, items):
-                    itemsByCategory[category] = items
+                    inventory = inventory.replacingItems(in: category, with: items)
                     completed.insert(category)
                     operation = .scanning(completed: completed)
-                    rebuildSummary()
 
                 case let .completed(snapshot):
-                    itemsByCategory = snapshot.itemsByCategory
-                    diskAvailableBytes = snapshot.diskAvailableBytes
-                    diskTotalBytes = snapshot.diskTotalBytes
+                    inventory = StorageInventory(snapshot: snapshot)
                     scanWarnings = snapshot.warnings
-                    lastScanCompletedAt = snapshot.scannedAt
                     pruneStaleSelection()
-                    rebuildSummary()
                     return
                 }
             }
         } catch is CancellationError {
             // Interrupted, not failed: restore the last completed result and report nothing.
-            itemsByCategory = previousItems
+            inventory = previousInventory
             scanWarnings = previousWarnings
-            rebuildSummary()
         } catch {
-            itemsByCategory = previousItems
+            inventory = previousInventory
             scanWarnings = previousWarnings
-            rebuildSummary()
             errorMessage = error.localizedDescription
         }
     }
 
     // MARK: - Querying
 
-    func items(for category: StorageCategory) -> [StorageItem] {
-        itemsByCategory[category] ?? []
-    }
-
     func visibleItems(for category: StorageCategory) -> [StorageItem] {
-        let base = items(for: category)
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
-        let filtered = base.filter { item in
-            guard statusFilter.matches(item) else { return false }
-            guard !query.isEmpty else { return true }
-            return item.name.localizedCaseInsensitiveContains(query)
-                || item.subtitle.localizedCaseInsensitiveContains(query)
-                || (item.workspacePath?.localizedCaseInsensitiveContains(query) ?? false)
-        }
-
-        return filtered.sorted(using: sortOrder)
+        inventory.items(in: category, matching: statusFilter, search: searchText, sortedBy: sortOrder)
     }
 
     var activeCategory: StorageCategory? {
@@ -256,8 +177,7 @@ final class XcodeSweepStore {
 
     var selectedItems: [StorageItem] {
         guard let category = activeCategory else { return [] }
-        let lookup = Dictionary(uniqueKeysWithValues: items(for: category).map { ($0.id, $0) })
-        return selectedItemIDs.compactMap { lookup[$0] }
+        return selectedItemIDs.compactMap { inventory.item(withID: $0) }.filter { $0.category == category }
     }
 
     var selectionPlan: DeletionPlan {
@@ -273,7 +193,7 @@ final class XcodeSweepStore {
     func openCategoryAndSelectReclaimable(_ category: StorageCategory) {
         sidebarSelection = .category(category)
         statusFilter = .reclaimable
-        let candidates = items(for: category).filter(\.isReclaimableCandidate)
+        let candidates = inventory.items(in: category).filter(\.isReclaimableCandidate)
         selectedItemIDs = Set(candidates.map(\.id))
     }
 
@@ -339,72 +259,18 @@ final class XcodeSweepStore {
     }
 
     private func removeItems(withIDs removedIDs: Set<StorageItem.ID>) {
-        guard !removedIDs.isEmpty else { return }
-        var changed = false
-        for category in StorageCategory.allCases {
-            guard var list = itemsByCategory[category] else { continue }
-            let beforeCount = list.count
-            list.removeAll { removedIDs.contains($0.id) }
-            if list.count != beforeCount {
-                itemsByCategory[category] = list
-                changed = true
-            }
-        }
+        inventory = inventory.removingItems(withIDs: removedIDs)
         selectedItemIDs.subtract(removedIDs)
-        if changed {
-            rebuildSummary()
-        }
     }
 
-    // MARK: - Summary Recomputation
+    // MARK: - Selection Pruning
 
     private func pruneStaleSelection() {
         guard let category = activeCategory else {
             selectedItemIDs.removeAll()
             return
         }
-        let validIDs = Set(items(for: category).map(\.id))
+        let validIDs = Set(inventory.items(in: category).map(\.id))
         selectedItemIDs.formIntersection(validIDs)
-    }
-
-    private func rebuildSummary() {
-        var totalBytes: Int64 = 0
-        var reclaimableBytes: Int64 = 0
-        var totalCount = 0
-        var reclaimableCount = 0
-        var metrics: [CategoryMetrics] = []
-
-        for category in StorageCategory.allCases {
-            let items = itemsByCategory[category] ?? []
-            let catBytes = items.reduce(Int64(0)) { $0 + $1.sizeBytes }
-            let reclaimable = items.filter(\.isReclaimableCandidate)
-            let catReclaimableBytes = reclaimable.reduce(Int64(0)) { $0 + $1.sizeBytes }
-
-            totalBytes += catBytes
-            reclaimableBytes += catReclaimableBytes
-            totalCount += items.count
-            reclaimableCount += reclaimable.count
-
-            metrics.append(
-                CategoryMetrics(
-                    category: category,
-                    itemCount: items.count,
-                    totalBytes: catBytes,
-                    reclaimableCount: reclaimable.count,
-                    reclaimableBytes: catReclaimableBytes
-                )
-            )
-        }
-
-        summary = ScanSummary(
-            scannedAt: lastScanCompletedAt,
-            totalBytes: totalBytes,
-            reclaimableBytes: reclaimableBytes,
-            totalItemCount: totalCount,
-            reclaimableItemCount: reclaimableCount,
-            diskAvailableBytes: diskAvailableBytes,
-            diskTotalBytes: diskTotalBytes,
-            categoryMetrics: metrics
-        )
     }
 }

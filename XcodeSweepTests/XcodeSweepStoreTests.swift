@@ -52,24 +52,24 @@ struct XcodeSweepStoreTests {
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
-        #expect(store.summary.scannedAt == nil)
+        #expect(store.inventory.scannedAt == nil)
         #expect(!store.hasCompletedScan)
         #expect(store.operation == .idle)
 
         await store.refreshIfNeeded()
 
-        #expect(store.summary.scannedAt == now)
+        #expect(store.inventory.scannedAt == now)
         #expect(store.hasCompletedScan)
         #expect(store.operation == .idle)
 
-        let orphanedItem = try #require(store.items(for: .derivedData).first { $0.path == orphanedURL })
-        let activeItem = try #require(store.items(for: .derivedData).first { $0.path == activeURL })
+        let orphanedItem = try #require(store.inventory.items(in: .derivedData).first { $0.path == orphanedURL })
+        let activeItem = try #require(store.inventory.items(in: .derivedData).first { $0.path == activeURL })
         let expectedTotal = orphanedItem.sizeBytes + activeItem.sizeBytes + 3_000_000_000
         let expectedReclaimable = orphanedItem.sizeBytes + 3_000_000_000
 
-        #expect(store.summary.totalBytes == expectedTotal)
-        #expect(store.summary.reclaimableBytes == expectedReclaimable)
-        #expect(store.summary.reclaimableItemCount == 2)
+        #expect(store.inventory.totalBytes == expectedTotal)
+        #expect(store.inventory.reclaimableBytes == expectedReclaimable)
+        #expect(store.inventory.reclaimableItemCount == 2)
 
         store.openCategoryAndSelectReclaimable(.derivedData)
         #expect(store.sidebarSelection == .category(.derivedData))
@@ -86,8 +86,8 @@ struct XcodeSweepStoreTests {
         await store.confirmDeletion(pending)
 
         #expect(await trasher.trashedURLs == [orphanedURL])
-        #expect(store.items(for: .derivedData).map(\.id) == [activeItem.id])
-        #expect(store.summary.totalBytes == activeItem.sizeBytes + 3_000_000_000)
+        #expect(store.inventory.items(in: .derivedData).map(\.id) == [activeItem.id])
+        #expect(store.inventory.totalBytes == activeItem.sizeBytes + 3_000_000_000)
         #expect(store.lastDeletionReport?.deletedCount == 1)
         #expect(store.lastDeletionReport?.reclaimedBytes == orphanedItem.sizeBytes)
         #expect(store.operation == .idle)
@@ -123,7 +123,7 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: storage)
 
         await store.refresh()
-        #expect(store.items(for: .derivedData).allSatisfy { $0.name == "SampleApp" })
+        #expect(store.inventory.items(in: .derivedData).allSatisfy { $0.name == "SampleApp" })
 
         store.openCategoryAndSelectReclaimable(.derivedData)
         store.requestDeleteSelected()
@@ -133,7 +133,7 @@ struct XcodeSweepStoreTests {
         await store.confirmDeletion(pending)
 
         #expect(await trasher.trashedURLs == [firstURL])
-        #expect(store.items(for: .derivedData).map(\.path) == [secondURL])
+        #expect(store.inventory.items(in: .derivedData).map(\.path) == [secondURL])
         #expect(store.lastDeletionReport?.deletedCount == 1)
         #expect(store.lastDeletionReport?.failures.map(\.itemID) == ["derivedData:\(secondURL.path)"])
     }
@@ -177,11 +177,11 @@ struct XcodeSweepStoreTests {
 
         await store.refresh()
 
-        let first = try #require(store.items(for: .derivedData).first { $0.path == firstURL })
-        let second = try #require(store.items(for: .derivedData).first { $0.path == secondURL })
-        let third = try #require(store.items(for: .derivedData).first { $0.path == thirdURL })
+        let first = try #require(store.inventory.items(in: .derivedData).first { $0.path == firstURL })
+        let second = try #require(store.inventory.items(in: .derivedData).first { $0.path == secondURL })
+        let third = try #require(store.inventory.items(in: .derivedData).first { $0.path == thirdURL })
         let totalInitialBytes = first.sizeBytes + second.sizeBytes + third.sizeBytes
-        #expect(store.summary.totalBytes == totalInitialBytes)
+        #expect(store.inventory.totalBytes == totalInitialBytes)
 
         // Batch 1: delete first and second, suspending between them inside FileTrashing.
         store.requestDelete(items: [first, second])
@@ -202,10 +202,10 @@ struct XcodeSweepStoreTests {
         let call2 = try await trasher.nextPendingTrash()
         #expect(call2.url == secondURL)
 
-        // Item 1 must already be removed live and summary totals decremented before batch 1 completes.
+        // Item 1 must already be removed live and inventory totals decremented before batch 1 completes.
         #expect(store.isDeleting)
-        #expect(Set(store.items(for: .derivedData).map(\.id)) == [second.id, third.id])
-        #expect(store.summary.totalBytes == second.sizeBytes + third.sizeBytes)
+        #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
+        #expect(store.inventory.totalBytes == second.sizeBytes + third.sizeBytes)
         #expect(store.deletionProgress?.completedCount == 1)
         #expect(store.deletionProgress?.removedBytes == first.sizeBytes)
 
@@ -215,8 +215,8 @@ struct XcodeSweepStoreTests {
         #expect(store.operation == .idle)
         #expect(!store.isDeleting)
         #expect(store.deletionProgress == nil)
-        #expect(store.items(for: .derivedData).map(\.id) == [third.id])
-        #expect(store.summary.totalBytes == third.sizeBytes)
+        #expect(store.inventory.items(in: .derivedData).map(\.id) == [third.id])
+        #expect(store.inventory.totalBytes == third.sizeBytes)
         #expect(store.lastDeletionReport?.deletedCount == 2)
 
         // Batch 2: verify a subsequent batch runs cleanly with no leftover progress state.
@@ -234,8 +234,8 @@ struct XcodeSweepStoreTests {
 
         await batch2Done
         #expect(store.operation == .idle)
-        #expect(store.items(for: .derivedData).isEmpty)
-        #expect(store.summary.totalBytes == 0)
+        #expect(store.inventory.items(in: .derivedData).isEmpty)
+        #expect(store.inventory.totalBytes == 0)
         #expect(store.lastDeletionReport?.deletedCount == 1)
     }
 
@@ -274,9 +274,9 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: storage)
 
         await store.refresh()
-        let first = try #require(store.items(for: .derivedData).first { $0.path == firstURL })
-        let second = try #require(store.items(for: .derivedData).first { $0.path == secondURL })
-        let third = try #require(store.items(for: .derivedData).first { $0.path == thirdURL })
+        let first = try #require(store.inventory.items(in: .derivedData).first { $0.path == firstURL })
+        let second = try #require(store.inventory.items(in: .derivedData).first { $0.path == secondURL })
+        let third = try #require(store.inventory.items(in: .derivedData).first { $0.path == thirdURL })
 
         store.requestDelete(items: [first, second, third])
         let pending = try #require(store.pendingDeletion)
@@ -303,7 +303,7 @@ struct XcodeSweepStoreTests {
         #expect(store.lastDeletionReport == nil)
         #expect(store.errorMessage == nil)
         #expect(await trasher.trashedURLs == [firstURL])
-        #expect(Set(store.items(for: .derivedData).map(\.id)) == [second.id, third.id])
+        #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
     }
 
     @Test(
@@ -332,7 +332,7 @@ struct XcodeSweepStoreTests {
         await refreshTask.value
 
         // Then: deterministic teardown guarantees no stray updates, no error, and unscanned state
-        #expect(store.summary.scannedAt == nil)
+        #expect(store.inventory.scannedAt == nil)
         #expect(!store.hasCompletedScan)
         #expect(store.errorMessage == nil)
         #expect(store.scanWarnings.isEmpty)
@@ -373,7 +373,7 @@ struct XcodeSweepStoreTests {
             }
         }
         await firstScan.value
-        let completedSummary = store.summary
+        let completedInventory = store.inventory
         let completedWarnings = store.scanWarnings
         #expect(completedWarnings.count == 1)
 
@@ -387,15 +387,15 @@ struct XcodeSweepStoreTests {
         _ = try await controller.nextPendingCall()
         _ = try await controller.nextPendingCall()
         try await waitUntil("rescan reported new DerivedData") {
-            await store.items(for: .derivedData).count == 2
+            await store.inventory.items(in: .derivedData).count == 2
         }
         rescan.cancel()
         await rescan.value
 
         // Then
         #expect(store.operation == .idle)
-        #expect(store.items(for: .derivedData).map(\.name) == ["Kept"])
-        #expect(store.summary == completedSummary)
+        #expect(store.inventory.items(in: .derivedData).map(\.name) == ["Kept"])
+        #expect(store.inventory == completedInventory)
         #expect(store.scanWarnings == completedWarnings)
         #expect(store.completedCategories == Set(StorageCategory.allCases))
     }
@@ -426,7 +426,7 @@ struct XcodeSweepStoreTests {
         let firstScan = Task { await store.refresh() }
         try await answerSimctl(controller)
         await firstScan.value
-        let target = try #require(store.items(for: .derivedData).first)
+        let target = try #require(store.inventory.items(in: .derivedData).first)
 
         // 1. Start a rescan and park it in simctl; deletion must be completely rejected.
         let rescan = Task { await store.refresh() }
@@ -460,7 +460,7 @@ struct XcodeSweepStoreTests {
         await trasher.resumeTrash(id: trashCall.id)
         await deleteTask.value
         #expect(store.operation == .idle)
-        #expect(store.items(for: .derivedData).isEmpty)
+        #expect(store.inventory.items(in: .derivedData).isEmpty)
     }
 
     private func answerSimctl(_ controller: ControllableCommandRunner) async throws {

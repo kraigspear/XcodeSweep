@@ -24,7 +24,8 @@
           "path": "Models",
           "children": [
             { "path": "DeletionPlan.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "ScanSummary.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "ItemFilter.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "StorageInventory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StorageCategory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StorageItem.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
           ],
@@ -67,6 +68,7 @@
         { "path": "DirectorySizerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "ProcessRunnerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "TestSupport.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "StorageInventoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeStorageTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeSweepStoreTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
       ],

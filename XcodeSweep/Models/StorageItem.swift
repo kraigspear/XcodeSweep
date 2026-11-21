@@ -29,7 +29,7 @@ enum DeletionMethod: Equatable, Hashable, Sendable {
 }
 
 /// Status badge surfaced in the table and used for quick filters.
-enum ItemStatus: String, Equatable, Hashable, Sendable {
+enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
     case active
     case orphaned
     case worktree
@@ -55,6 +55,13 @@ enum ItemStatus: String, Equatable, Hashable, Sendable {
         case .systemManaged:
             "System"
         }
+    }
+
+    /// Plain-language list of the statuses that count toward recommended cleanup.
+    static var cleanupRecommendationSummary: String {
+        let labels = allCases.filter(\.isRecommendedForCleanup).map { $0.label.lowercased() }
+        guard labels.count > 1, let last = labels.last else { return labels.first ?? "" }
+        return labels.dropLast().joined(separator: ", ") + ", or " + last
     }
 
     var isRecommendedForCleanup: Bool {
