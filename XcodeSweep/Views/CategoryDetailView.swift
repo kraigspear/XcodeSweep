@@ -87,9 +87,7 @@ struct CategoryDetailView: View {
             Divider()
 
             SelectionActionFooter(
-                selectedCount: store.deletableSelectedItems.count,
-                selectedBytes: store.selectedTotalBytes,
-                hasPermanentDeletions: store.deletableSelectedItems.contains { $0.deletionMethod.isPermanent },
+                selectionPlan: store.selectionPlan,
                 operation: store.operation,
                 onSelectRecommended: { store.selectReclaimableInActiveCategory() },
                 onSelectAll: { store.selectAllDeletableInActiveCategory() },
@@ -205,10 +203,9 @@ private struct ItemContextMenuContent: View {
             Divider()
         }
 
-        let deletable = items.filter(\.isDeletable)
-        if !deletable.isEmpty {
-            let anyPermanent = deletable.contains { $0.deletionMethod.isPermanent }
-            Button(anyPermanent ? "Delete…" : "Move to Trash…", role: .destructive) {
+        let plan = DeletionPlan(selection: items)
+        if !plan.isEmpty {
+            Button(plan.requestTitle, role: .destructive) {
                 onDelete()
             }
             .disabled(!canDelete)
@@ -217,9 +214,7 @@ private struct ItemContextMenuContent: View {
 }
 
 private struct SelectionActionFooter: View {
-    let selectedCount: Int
-    let selectedBytes: Int64
-    let hasPermanentDeletions: Bool
+    let selectionPlan: DeletionPlan
     let operation: OperationState
     let onSelectRecommended: () -> Void
     let onSelectAll: () -> Void
@@ -238,7 +233,7 @@ private struct SelectionActionFooter: View {
                 .controlSize(.small)
                 .disabled(operation.isDeleting)
 
-            if selectedCount > 0, !operation.isDeleting {
+            if !selectionPlan.isEmpty, !operation.isDeleting {
                 Button("Clear", action: onClearSelection)
                     .buttonStyle(.borderless)
                     .controlSize(.small)
@@ -254,21 +249,20 @@ private struct SelectionActionFooter: View {
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-            } else if selectedCount > 0 {
-                Text("\(selectedCount) selected • \(selectedBytes, format: .byteCount(style: .file))")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+            } else if !selectionPlan.isEmpty {
+                Text(
+                    "\(selectionPlan.deletableItems.count) selected • \(selectionPlan.totalBytes, format: .byteCount(style: .file))"
+                )
+                .font(.callout.monospacedDigit())
+                .foregroundStyle(.secondary)
             }
 
             Button(role: .destructive, action: onRequestDelete) {
-                Label(
-                    hasPermanentDeletions ? "Delete Selected…" : "Move to Trash…",
-                    systemImage: "trash"
-                )
+                Label(selectionPlan.requestTitle, systemImage: "trash")
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(selectedCount == 0 || operation.isBusy)
+            .disabled(selectionPlan.isEmpty || operation.isBusy)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

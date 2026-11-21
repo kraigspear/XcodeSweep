@@ -21,11 +21,11 @@ struct XcodeSweepApp: App {
             }
 
             CommandGroup(after: .pasteboard) {
-                Button("Delete Selected…") {
+                Button(xcodeSweepStore.selectionPlan.requestTitle) {
                     xcodeSweepStore.requestDeleteSelected()
                 }
                 .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(xcodeSweepStore.deletableSelectedItems.isEmpty || !xcodeSweepStore.canDelete)
+                .disabled(xcodeSweepStore.selectionPlan.isEmpty || !xcodeSweepStore.canDelete)
             }
 
             CommandGroup(after: .sidebar) {

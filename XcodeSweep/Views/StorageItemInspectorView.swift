@@ -16,7 +16,12 @@ struct StorageItemInspectorView: View {
         } else if selectedItems.count == 1, let item = selectedItems.first {
             SingleItemInspectorContent(item: item, canDelete: canDelete, onDelete: { onDelete([item]) })
         } else {
-            MultiItemInspectorContent(items: selectedItems, canDelete: canDelete, onDelete: { onDelete(selectedItems) })
+            MultiItemInspectorContent(
+                selectionCount: selectedItems.count,
+                plan: DeletionPlan(selection: selectedItems),
+                canDelete: canDelete,
+                onDelete: { onDelete(selectedItems) }
+            )
         }
     }
 }
@@ -54,7 +59,7 @@ private struct SingleItemInspectorContent: View {
                 VStack(alignment: .leading, spacing: 10) {
                     LabeledInspectorRow(
                         label: "Cleanup Action",
-                        value: cleanupDescription(for: item.deletionMethod)
+                        value: item.deletionMethod.cleanupDescription
                     )
 
                     if let lastUsed = item.lastUsedDate {
@@ -84,11 +89,8 @@ private struct SingleItemInspectorContent: View {
 
                     if item.isDeletable {
                         Button(role: .destructive, action: onDelete) {
-                            Label(
-                                item.deletionMethod.isPermanent ? "Delete via simctl…" : "Move to Trash…",
-                                systemImage: "trash"
-                            )
-                            .frame(maxWidth: .infinity)
+                            Label(DeletionPlan(selection: [item]).requestTitle, systemImage: "trash")
+                                .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
@@ -99,77 +101,46 @@ private struct SingleItemInspectorContent: View {
             .padding(16)
         }
     }
-
-    private func cleanupDescription(for method: DeletionMethod) -> String {
-        switch method {
-        case .trashFile:
-            "Moves folder to Trash (reversible)"
-        case let .simctlDevice(_, isBooted):
-            isBooted
-                ? "Shuts down simulator, then permanently deletes via xcrun simctl"
-                : "Permanently deletes via xcrun simctl delete"
-        case .simctlRuntime:
-            "Permanently deletes runtime disk image via xcrun simctl runtime delete"
-        case let .notDeletable(reason):
-            "Protected: \(reason)"
-        }
-    }
 }
 
 private struct MultiItemInspectorContent: View {
-    let items: [StorageItem]
+    let selectionCount: Int
+    let plan: DeletionPlan
     let canDelete: Bool
     let onDelete: () -> Void
-
-    private var deletableItems: [StorageItem] {
-        items.filter(\.isDeletable)
-    }
-
-    private var totalBytes: Int64 {
-        deletableItems.reduce(0) { $0 + $1.sizeBytes }
-    }
-
-    private var trashCount: Int {
-        deletableItems.filter { !$0.deletionMethod.isPermanent }.count
-    }
-
-    private var simctlCount: Int {
-        deletableItems.filter { $0.deletionMethod.isPermanent }.count
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(items.count) Items Selected")
+                Text("\(selectionCount) Items Selected")
                     .font(.headline)
-                Text(totalBytes, format: .byteCount(style: .file))
+                Text(plan.totalBytes, format: .byteCount(style: .file))
                     .font(.title2.bold().monospacedDigit())
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                if trashCount > 0 {
-                    LabeledInspectorRow(label: "Move to Trash", value: "\(trashCount) items (reversible)")
+                if plan.trashCount > 0 {
+                    LabeledInspectorRow(label: "Move to Trash", value: "\(plan.trashCount) items (reversible)")
                 }
-                if simctlCount > 0 {
-                    LabeledInspectorRow(label: "xcrun simctl delete", value: "\(simctlCount) items (permanent)")
+                if plan.permanentCount > 0 {
+                    LabeledInspectorRow(label: "xcrun simctl delete", value: "\(plan.permanentCount) items (permanent)")
                 }
-                let protectedCount = items.count - deletableItems.count
-                if protectedCount > 0 {
-                    LabeledInspectorRow(label: "Protected (Skipped)", value: "\(protectedCount) items")
+                if plan.protectedCount > 0 {
+                    LabeledInspectorRow(label: "Protected (Skipped)", value: "\(plan.protectedCount) items")
                 }
             }
 
             Spacer()
 
             Button(role: .destructive, action: onDelete) {
-                Label("Remove \(deletableItems.count) Items…", systemImage: "trash")
+                Label(plan.requestTitle, systemImage: "trash")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(deletableItems.isEmpty || !canDelete)
+            .disabled(plan.isEmpty || !canDelete)
         }
         .padding(16)
     }

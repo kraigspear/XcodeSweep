@@ -53,68 +53,6 @@ enum ItemFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
     }
 }
 
-struct PendingDeletion: Identifiable, Equatable, Sendable {
-    let id = UUID()
-    let items: [StorageItem]
-
-    var totalBytes: Int64 {
-        items.reduce(0) { $0 + $1.sizeBytes }
-    }
-
-    var trashedCount: Int {
-        items.filter { !$0.deletionMethod.isPermanent && $0.isDeletable }.count
-    }
-
-    var simctlCount: Int {
-        items.filter { $0.deletionMethod.isPermanent }.count
-    }
-
-    var bootedDeviceCount: Int {
-        items.filter {
-            if case let .simctlDevice(_, isBooted) = $0.deletionMethod {
-                return isBooted
-            }
-            return false
-        }.count
-    }
-
-    var actionButtonTitle: String {
-        if simctlCount > 0 && trashedCount == 0 {
-            return "Delete \(items.count) \(items.count == 1 ? "Item" : "Items")"
-        }
-        if trashedCount > 0 && simctlCount == 0 {
-            return "Move \(items.count) \(items.count == 1 ? "Item" : "Items") to Trash"
-        }
-        return "Remove \(items.count) Items"
-    }
-
-    var confirmationMessage: String {
-        let formattedSize = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
-        var parts: [String] = []
-
-        if trashedCount > 0 {
-            parts
-                .append(
-                    "\(trashedCount) filesystem \(trashedCount == 1 ? "item" : "items") will be moved to Trash (reversible)."
-                )
-        }
-        if simctlCount > 0 {
-            parts
-                .append(
-                    "\(simctlCount) simulator \(simctlCount == 1 ? "item" : "items") will be permanently deleted using xcrun simctl."
-                )
-        }
-        if bootedDeviceCount > 0 {
-            parts
-                .append(
-                    "\(bootedDeviceCount) booted \(bootedDeviceCount == 1 ? "simulator" : "simulators") will be shut down first."
-                )
-        }
-
-        return "Estimated space to reclaim: \(formattedSize).\n\n" + parts.joined(separator: " ")
-    }
-}
-
 /// Single mutually-exclusive lifecycle state for `XcodeSweepStore`.
 enum OperationState: Equatable, Sendable {
     case idle
@@ -184,7 +122,7 @@ final class XcodeSweepStore {
     private(set) var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
     private(set) var summary: ScanSummary = .empty
     private(set) var scanWarnings: [String] = []
-    var pendingDeletion: PendingDeletion?
+    var pendingDeletion: DeletionPlan?
     var lastDeletionReport: DeletionReport?
     var errorMessage: String?
 
@@ -322,12 +260,8 @@ final class XcodeSweepStore {
         return selectedItemIDs.compactMap { lookup[$0] }
     }
 
-    var deletableSelectedItems: [StorageItem] {
-        selectedItems.filter(\.isDeletable)
-    }
-
-    var selectedTotalBytes: Int64 {
-        deletableSelectedItems.reduce(0) { $0 + $1.sizeBytes }
+    var selectionPlan: DeletionPlan {
+        DeletionPlan(selection: selectedItems)
     }
 
     func isCategoryScanning(_ category: StorageCategory) -> Bool {
@@ -362,25 +296,25 @@ final class XcodeSweepStore {
     // MARK: - Deletion Flow
 
     func requestDeleteSelected() {
-        requestDelete(items: deletableSelectedItems)
+        requestDelete(items: selectedItems)
     }
 
     func requestDelete(items: [StorageItem]) {
         guard canDelete else { return }
-        let deletable = items.filter(\.isDeletable)
-        guard !deletable.isEmpty else { return }
-        pendingDeletion = PendingDeletion(items: deletable)
+        let plan = DeletionPlan(selection: items)
+        guard !plan.isEmpty else { return }
+        pendingDeletion = plan
     }
 
-    func confirmDeletion(_ pending: PendingDeletion) async {
-        guard canDelete, !pending.items.isEmpty else { return }
+    func confirmDeletion(_ plan: DeletionPlan) async {
+        guard canDelete, !plan.isEmpty else { return }
 
         pendingDeletion = nil
         operation = .deleting(nil)
         defer { operation = .idle }
 
         do {
-            for try await event in xcodeStorage.delete(items: pending.items) {
+            for try await event in xcodeStorage.delete(items: plan.deletableItems) {
                 switch event {
                 case let .starting(progress):
                     operation = .deleting(progress)

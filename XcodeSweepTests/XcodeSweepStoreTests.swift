@@ -75,11 +75,11 @@ struct XcodeSweepStoreTests {
         #expect(store.sidebarSelection == .category(.derivedData))
         #expect(store.statusFilter == .reclaimable)
         #expect(store.selectedItemIDs == [orphanedItem.id])
-        #expect(store.selectedTotalBytes == orphanedItem.sizeBytes)
+        #expect(store.selectionPlan.totalBytes == orphanedItem.sizeBytes)
 
         store.requestDeleteSelected()
         let pending = try #require(store.pendingDeletion)
-        #expect(pending.items.map(\.id) == [orphanedItem.id])
+        #expect(pending.deletableItems.map(\.id) == [orphanedItem.id])
 
         // Simulate SwiftUI `.confirmationDialog(item:)` clearing the binding before the button's Task runs.
         store.pendingDeletion = nil
@@ -437,7 +437,7 @@ struct XcodeSweepStoreTests {
         #expect(!store.canDelete)
         store.requestDelete(items: [target])
         #expect(store.pendingDeletion == nil)
-        await store.confirmDeletion(PendingDeletion(items: [target]))
+        await store.confirmDeletion(DeletionPlan(selection: [target]))
         #expect(await trasher.trashedURLs.isEmpty)
 
         rescan.cancel()
