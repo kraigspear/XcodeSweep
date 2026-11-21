@@ -50,7 +50,7 @@ struct ContentView: View {
             "Confirm Cleanup",
             item: $bindableStore.pendingDeletion
         ) { pending in
-            Button(pending.actionButtonTitle, role: .destructive) {
+            Button(pending.actionTitle, role: .destructive) {
                 Task {
                     await store.confirmDeletion(pending)
                 }
@@ -63,7 +63,7 @@ struct ContentView: View {
         }
         .alert("Cleanup Complete", item: $bindableStore.lastDeletionReport) { _ in
         } message: { report in
-            Text(deletionReportSummary(report))
+            Text(report.summary)
         }
         .alert("Scan Error", item: $bindableStore.errorMessage) { _ in
         } message: { message in
@@ -72,28 +72,6 @@ struct ContentView: View {
         .task {
             await store.refreshIfNeeded()
         }
-    }
-
-    private func deletionReportSummary(_ report: DeletionReport) -> String {
-        let reclaimed = ByteCountFormatter.string(fromByteCount: report.reclaimedBytes, countStyle: .file)
-        var lines: [String] = []
-        lines.append("Removed \(report.deletedCount) \(report.deletedCount == 1 ? "item" : "items") (~\(reclaimed)).")
-
-        if report.trashedCount > 0 {
-            lines.append("Moved \(report.trashedCount) to Trash (empty Trash to free disk space immediately).")
-        }
-        if report.simctlDeletedCount > 0 {
-            lines.append("Deleted \(report.simctlDeletedCount) via xcrun simctl.")
-        }
-        if report.hasFailures {
-            let failureText = report.failures
-                .prefix(4)
-                .map { "• \($0.itemName): \($0.reason)" }
-                .joined(separator: "\n")
-            lines.append("\nCould not remove \(report.failures.count):\n\(failureText)")
-        }
-
-        return lines.joined(separator: "\n")
     }
 }
 

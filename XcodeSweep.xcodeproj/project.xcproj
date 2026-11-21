@@ -23,6 +23,7 @@
           "kind": "group",
           "path": "Models",
           "children": [
+            { "path": "DeletionPlan.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "ScanSummary.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StorageCategory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StorageItem.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
@@ -62,6 +63,7 @@
       "kind": "group",
       "path": "XcodeSweepTests",
       "children": [
+        { "path": "DeletionPlanTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DirectorySizerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "ProcessRunnerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "TestSupport.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
