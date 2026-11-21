@@ -484,3 +484,13 @@ func makeStorageItem(
         metadata: []
     )
 }
+
+func finalScanSnapshot(from storage: XcodeStorage) async throws -> ScanSnapshot {
+    var snapshot: ScanSnapshot?
+    for try await event in storage.scan() {
+        if case let .completed(final) = event {
+            snapshot = final
+        }
+    }
+    return try #require(snapshot)
+}
