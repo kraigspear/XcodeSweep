@@ -112,7 +112,7 @@ private struct CategoryFilterBar: View {
     var body: some View {
         HStack(spacing: 12) {
             Picker("Filter", selection: $selectedFilter) {
-                ForEach(ItemFilter.filters(for: category)) { filter in
+                ForEach(category.availableFilters) { filter in
                     Text(filter.title).tag(filter)
                 }
             }

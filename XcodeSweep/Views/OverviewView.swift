@@ -8,11 +8,11 @@ struct OverviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 OverviewKPIHeader(
-                    totalBytes: store.summary.totalBytes,
-                    totalItems: store.summary.totalItemCount,
-                    reclaimableBytes: store.summary.reclaimableBytes,
-                    reclaimableItems: store.summary.reclaimableItemCount,
-                    diskAvailableBytes: store.summary.diskAvailableBytes,
+                    totalBytes: store.inventory.totalBytes,
+                    totalItems: store.inventory.totalItemCount,
+                    reclaimableBytes: store.inventory.reclaimableBytes,
+                    reclaimableItems: store.inventory.reclaimableItemCount,
+                    diskAvailableBytes: store.inventory.diskAvailableBytes,
                     isScanning: store.isScanning
                 )
 
@@ -20,10 +20,10 @@ struct OverviewView: View {
                     ScanWarningsBanner(warnings: store.scanWarnings)
                 }
 
-                StorageBreakdownChartCard(metrics: store.summary.categoryMetrics)
+                StorageBreakdownChartCard(metrics: store.inventory.categoryMetrics)
 
                 CategoryGridSection(
-                    metrics: store.summary.categoryMetrics,
+                    metrics: store.inventory.categoryMetrics,
                     isCategoryScanning: { store.isCategoryScanning($0) },
                     onOpenCategory: { category in
                         store.sidebarSelection = .category(category)
@@ -63,7 +63,7 @@ private struct OverviewKPIHeader: View {
                 SummaryStatCard(
                     title: "Recommended Cleanup",
                     valueText: ByteCountFormatter.string(fromByteCount: reclaimableBytes, countStyle: .file),
-                    footnote: "\(reclaimableItems) orphaned, unavailable, or unused",
+                    footnote: "\(reclaimableItems) \(ItemStatus.cleanupRecommendationSummary)",
                     systemImage: "sparkles",
                     tint: .orange
                 )

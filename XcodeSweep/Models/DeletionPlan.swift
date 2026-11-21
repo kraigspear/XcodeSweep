@@ -77,6 +77,41 @@ struct DeletionPlan: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Live progress snapshot displayed during a batch deletion.
+struct DeletionProgress: Equatable, Sendable {
+    let completedCount: Int
+    let totalCount: Int
+    let currentItemName: String
+    let removedBytes: Int64
+
+    var fractionCompleted: Double {
+        guard totalCount > 0 else { return 0 }
+        return min(1, max(0, Double(completedCount) / Double(totalCount)))
+    }
+}
+
+/// Outcome of a batch deletion operation.
+struct DeletionReport: Equatable, Identifiable, Sendable {
+    let id = UUID()
+    let deletedCount: Int
+    let trashedCount: Int
+    let simctlDeletedCount: Int
+    let reclaimedBytes: Int64
+    let removedItemIDs: Set<StorageItem.ID>
+    let failures: [DeletionFailure]
+
+    var hasFailures: Bool {
+        !failures.isEmpty
+    }
+}
+
+struct DeletionFailure: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let itemID: StorageItem.ID
+    let itemName: String
+    let reason: String
+}
+
 extension DeletionMethod {
     var cleanupDescription: String {
         switch self {

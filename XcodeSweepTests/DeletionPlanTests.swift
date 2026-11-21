@@ -10,10 +10,10 @@ struct DeletionPlanTests {
     func init_withMixedSelection_excludesProtectedItemsFromCountsAndBytes() {
         // Given: A trash item, a booted device, a runtime, and a protected runtime
         let selection = [
-            makeItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd"))),
-            makeItem(id: "sim", sizeBytes: 20, method: .simctlDevice(udid: "SIM-1", isBooted: true)),
-            makeItem(id: "rt", sizeBytes: 3, method: .simctlRuntime(identifier: "RT-1")),
-            makeItem(id: "sys", sizeBytes: 9000, method: .notDeletable(reason: "System")),
+            makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd"))),
+            makeStorageItem(id: "sim", sizeBytes: 20, method: .simctlDevice(udid: "SIM-1", isBooted: true)),
+            makeStorageItem(id: "rt", sizeBytes: 3, method: .simctlRuntime(identifier: "RT-1")),
+            makeStorageItem(id: "sys", sizeBytes: 9000, method: .notDeletable(reason: "System")),
         ]
 
         // When
@@ -33,7 +33,7 @@ struct DeletionPlanTests {
     /// To replicate: select only a system-managed runtime → the delete buttons stay disabled.
     @Test("Selection of only protected items is empty")
     func init_withOnlyProtectedItems_isEmpty() {
-        let plan = DeletionPlan(selection: [makeItem(id: "sys", method: .notDeletable(reason: "System"))])
+        let plan = DeletionPlan(selection: [makeStorageItem(id: "sys", method: .notDeletable(reason: "System"))])
 
         #expect(plan.isEmpty)
         #expect(plan.totalBytes == 0)
@@ -53,7 +53,7 @@ struct DeletionPlanTests {
         ([.trashFile(URL(filePath: "/tmp/a")), .notDeletable(reason: "System")], "Move 1 Item to Trash"),
     ])
     func actionTitle_matchesRemovalMethod(methods: [DeletionMethod], expected: String) {
-        let selection = methods.enumerated().map { makeItem(id: "\($0.offset)", method: $0.element) }
+        let selection = methods.enumerated().map { makeStorageItem(id: "\($0.offset)", method: $0.element) }
 
         let plan = DeletionPlan(selection: selection)
 
@@ -65,8 +65,8 @@ struct DeletionPlanTests {
     @Test("Confirmation message describes every removal consequence")
     func confirmationMessage_withTrashAndBootedDevice_describesEachConsequence() {
         let plan = DeletionPlan(selection: [
-            makeItem(id: "dd", method: .trashFile(URL(filePath: "/tmp/dd"))),
-            makeItem(id: "sim", method: .simctlDevice(udid: "SIM-1", isBooted: true)),
+            makeStorageItem(id: "dd", method: .trashFile(URL(filePath: "/tmp/dd"))),
+            makeStorageItem(id: "sim", method: .simctlDevice(udid: "SIM-1", isBooted: true)),
         ])
 
         let message = plan.confirmationMessage
@@ -80,7 +80,7 @@ struct DeletionPlanTests {
     /// To replicate: select only DerivedData folders → press ⌘⌫ → the dialog mentions only Trash.
     @Test("Trash-only confirmation omits permanent-deletion warnings")
     func confirmationMessage_withTrashOnly_omitsSimctlWarnings() {
-        let plan = DeletionPlan(selection: [makeItem(id: "dd", method: .trashFile(URL(filePath: "/tmp/dd")))])
+        let plan = DeletionPlan(selection: [makeStorageItem(id: "dd", method: .trashFile(URL(filePath: "/tmp/dd")))])
 
         let message = plan.confirmationMessage
 
@@ -110,21 +110,5 @@ struct DeletionPlanTests {
         #expect(summary.contains("Could not remove 6"))
         #expect(summary.contains("Item 4: Busy"))
         #expect(!summary.contains("Item 5"))
-    }
-
-    private func makeItem(id: String, sizeBytes: Int64 = 1, method: DeletionMethod) -> StorageItem {
-        StorageItem(
-            id: id,
-            category: .derivedData,
-            name: id,
-            subtitle: "",
-            sizeBytes: sizeBytes,
-            lastUsedDate: nil,
-            path: nil,
-            workspacePath: nil,
-            status: .stale,
-            deletionMethod: method,
-            metadata: []
-        )
     }
 }
