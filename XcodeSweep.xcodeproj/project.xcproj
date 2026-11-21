@@ -18,18 +18,38 @@
         { "path": "Assets.xcassets", "target-membership": [ "XcodeSweep/resources" ] },
         { "path": "XcodeSweep.icon", "target-membership": [ "XcodeSweep/resources" ] },
         { "path": "XcodeSweep.entitlements" },
-        { "path": "XcodeSweepApp.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
         {
           "kind": "group",
-          "path": "Models",
+          "path": "App",
+          "children": [
+            { "path": "ContentView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "XcodeSweepApp.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "XcodeSweepStore.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+          ],
+        },
+        {
+          "kind": "group",
+          "path": "Deletion",
           "children": [
             { "path": "DeletionPlan.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "ItemFilter.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "StorageInventory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "StorageCategory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "StorageItem.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
           ],
-        }, {
+        },
+        {
+          "kind": "group",
+          "path": "Inventory",
+          "children": [
+            { "path": "CategoryDetailView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "ItemFilter.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "OverviewView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "SidebarView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "StatusBadgeView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "StorageCategory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "StorageInventory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "StorageItem.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "StorageItemInspectorView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+          ],
+        },
+        {
           "kind": "group",
           "path": "Storage",
           "children": [
@@ -40,23 +60,6 @@
             { "path": "XcodeStorage+DerivedData.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "XcodeStorage+Extras.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "XcodeStorage.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-          ],
-        }, {
-          "kind": "group",
-          "path": "State",
-          "children": [
-            { "path": "XcodeSweepStore.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-          ],
-        }, {
-          "kind": "group",
-          "path": "Views",
-          "children": [
-            { "path": "CategoryDetailView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "ContentView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "OverviewView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "SidebarView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "StatusBadgeView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
-            { "path": "StorageItemInspectorView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
           ],
         },
       ],
