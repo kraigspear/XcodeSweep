@@ -2,6 +2,8 @@
 
 A native macOS SwiftUI utility for inspecting and safely cleaning Xcode build and Simulator storage—especially orphaned `DerivedData` left behind by Git worktrees, oversized CoreSimulator devices, and unused Simulator runtime disk images.
 
+![XcodeSweep Overview showing total Xcode storage, recommended cleanup, and storage by category](docs/screenshots/overview.png)
+
 ## What It Scans
 
 - **DerivedData** (`~/Library/Developer/Xcode/DerivedData`) — reads each folder's `info.plist` to identify missing/orphaned workspaces, active Git worktrees, and unused projects.
