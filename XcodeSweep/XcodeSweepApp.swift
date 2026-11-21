@@ -17,7 +17,7 @@ struct XcodeSweepApp: App {
                     }
                 }
                 .keyboardShortcut("r", modifiers: .command)
-                .disabled(xcodeSweepStore.isScanning || xcodeSweepStore.isDeleting)
+                .disabled(!xcodeSweepStore.canRefresh)
             }
 
             CommandGroup(after: .pasteboard) {
@@ -25,7 +25,7 @@ struct XcodeSweepApp: App {
                     xcodeSweepStore.requestDeleteSelected()
                 }
                 .keyboardShortcut(.delete, modifiers: .command)
-                .disabled(xcodeSweepStore.deletableSelectedItems.isEmpty || xcodeSweepStore.isDeleting)
+                .disabled(xcodeSweepStore.deletableSelectedItems.isEmpty || !xcodeSweepStore.canDelete)
             }
 
             CommandGroup(after: .sidebar) {

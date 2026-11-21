@@ -15,7 +15,7 @@ struct CategoryMetrics: Identifiable, Equatable, Hashable, Sendable {
 
 /// Snapshot of disk capacity and scanned Xcode storage totals.
 struct ScanSummary: Equatable, Sendable {
-    let scannedAt: Date
+    let scannedAt: Date?
     let totalBytes: Int64
     let reclaimableBytes: Int64
     let totalItemCount: Int
@@ -25,7 +25,7 @@ struct ScanSummary: Equatable, Sendable {
     let categoryMetrics: [CategoryMetrics]
 
     static let empty = ScanSummary(
-        scannedAt: .distantPast,
+        scannedAt: nil,
         totalBytes: 0,
         reclaimableBytes: 0,
         totalItemCount: 0,
@@ -44,13 +44,12 @@ struct ScanSummary: Equatable, Sendable {
     )
 }
 
-/// Live progress snapshot emitted during a batch deletion.
+/// Live progress snapshot displayed during a batch deletion.
 struct DeletionProgress: Equatable, Sendable {
     let completedCount: Int
     let totalCount: Int
     let currentItemName: String
     let removedBytes: Int64
-    let removedItemID: StorageItem.ID?
 
     var fractionCompleted: Double {
         guard totalCount > 0 else { return 0 }

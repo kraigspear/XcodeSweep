@@ -78,6 +78,7 @@ struct CategoryDetailView: View {
                     let targetItems = visibleItems.filter { selectedIDs.contains($0.id) }
                     ItemContextMenuContent(
                         items: targetItems,
+                        canDelete: store.canDelete,
                         onDelete: { store.requestDelete(items: targetItems) }
                     )
                 }
@@ -89,7 +90,7 @@ struct CategoryDetailView: View {
                 selectedCount: store.deletableSelectedItems.count,
                 selectedBytes: store.selectedTotalBytes,
                 hasPermanentDeletions: store.deletableSelectedItems.contains { $0.deletionMethod.isPermanent },
-                deletionProgress: store.deletionProgress,
+                operation: store.operation,
                 onSelectRecommended: { store.selectReclaimableInActiveCategory() },
                 onSelectAll: { store.selectAllDeletableInActiveCategory() },
                 onClearSelection: { store.clearSelection() },
@@ -181,6 +182,7 @@ private struct CategoryEmptyStateView: View {
 
 private struct ItemContextMenuContent: View {
     let items: [StorageItem]
+    let canDelete: Bool
     let onDelete: () -> Void
 
     var body: some View {
@@ -209,6 +211,7 @@ private struct ItemContextMenuContent: View {
             Button(anyPermanent ? "Delete…" : "Move to Trash…", role: .destructive) {
                 onDelete()
             }
+            .disabled(!canDelete)
         }
     }
 }
@@ -217,29 +220,25 @@ private struct SelectionActionFooter: View {
     let selectedCount: Int
     let selectedBytes: Int64
     let hasPermanentDeletions: Bool
-    let deletionProgress: DeletionProgress?
+    let operation: OperationState
     let onSelectRecommended: () -> Void
     let onSelectAll: () -> Void
     let onClearSelection: () -> Void
     let onRequestDelete: () -> Void
-
-    private var isDeleting: Bool {
-        deletionProgress != nil
-    }
 
     var body: some View {
         HStack(spacing: 10) {
             Button("Select Recommended", action: onSelectRecommended)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(isDeleting)
+                .disabled(operation.isDeleting)
 
             Button("Select All", action: onSelectAll)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(isDeleting)
+                .disabled(operation.isDeleting)
 
-            if selectedCount > 0, !isDeleting {
+            if selectedCount > 0, !operation.isDeleting {
                 Button("Clear", action: onClearSelection)
                     .buttonStyle(.borderless)
                     .controlSize(.small)
@@ -247,7 +246,7 @@ private struct SelectionActionFooter: View {
 
             Spacer()
 
-            if let progress = deletionProgress {
+            if case let .deleting(progress?) = operation {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -269,7 +268,7 @@ private struct SelectionActionFooter: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(selectedCount == 0 || isDeleting)
+            .disabled(selectedCount == 0 || operation.isBusy)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

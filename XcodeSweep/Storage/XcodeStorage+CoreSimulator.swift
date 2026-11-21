@@ -31,10 +31,17 @@ extension XcodeStorage {
 
     func deleteSimulatorDevice(udid: String, isBooted: Bool) async throws {
         if isBooted {
-            _ = try? await commandRunner.run(
-                executableURL: Self.xcrunURL,
-                arguments: ["simctl", "shutdown", udid]
-            )
+            do {
+                _ = try await commandRunner.run(
+                    executableURL: Self.xcrunURL,
+                    arguments: ["simctl", "shutdown", udid]
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Best-effort shutdown: proceed to delete even if simulator is already shut down.
+            }
+            try Task.checkCancellation()
         }
         _ = try await commandRunner.run(
             executableURL: Self.xcrunURL,
