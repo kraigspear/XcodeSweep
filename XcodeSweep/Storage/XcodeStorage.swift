@@ -1,11 +1,26 @@
 import Foundation
 
-/// Snapshot returned after scanning all Xcode and CoreSimulator storage categories.
+/// Snapshot emitted at the end of a completed scan across all storage categories.
 struct ScanSnapshot: Equatable, Sendable {
+    let scannedAt: Date
     let itemsByCategory: [StorageCategory: [StorageItem]]
     let diskAvailableBytes: Int64?
     let diskTotalBytes: Int64?
     let warnings: [String]
+}
+
+/// Ordered lifecycle events emitted by `XcodeStorage.scan()`.
+enum ScanEvent: Equatable, Sendable {
+    case categoryScanned(StorageCategory, [StorageItem])
+    case completed(ScanSnapshot)
+}
+
+/// Ordered lifecycle events emitted by `XcodeStorage.delete(items:)`.
+enum DeletionEvent: Equatable, Sendable {
+    case starting(DeletionProgress)
+    case deleted(itemID: StorageItem.ID, progress: DeletionProgress)
+    case failed(DeletionFailure, progress: DeletionProgress)
+    case completed(DeletionReport)
 }
 
 /// Deep module owning local Xcode and CoreSimulator storage inspection and safe cleanup.
@@ -46,167 +61,24 @@ struct XcodeStorage: Sendable {
 
     // MARK: - Scanning
 
-    func scanAll(
-        onProgress: @escaping @Sendable (StorageCategory, [StorageItem]) async -> Void
-    ) async throws -> ScanSnapshot {
-        let capacity = readVolumeCapacity()
-        let referenceDate = now()
-
-        let snapshot = await withTaskGroup(
-            of: (StorageCategory, [StorageItem], String?)?.self,
-            returning: ScanSnapshot.self
-        ) { group in
-            group.addTask {
-                let items = await scanDerivedData(now: referenceDate)
-                return (.derivedData, items, nil)
-            }
-
-            group.addTask {
-                do {
-                    let items = try await scanSimulatorDevices(now: referenceDate)
-                    return (.simulatorDevices, items, nil)
-                } catch is CancellationError {
-                    return nil
-                } catch {
-                    return (.simulatorDevices, [], "Simulator Devices: \(error.localizedDescription)")
-                }
-            }
-
-            group.addTask {
-                do {
-                    let items = try await scanSimulatorRuntimes(now: referenceDate)
-                    return (.simulatorRuntimes, items, nil)
-                } catch is CancellationError {
-                    return nil
-                } catch {
-                    return (.simulatorRuntimes, [], "Simulator Runtimes: \(error.localizedDescription)")
-                }
-            }
-
-            group.addTask {
-                let items = await scanDeviceSupport(now: referenceDate)
-                return (.deviceSupport, items, nil)
-            }
-
-            group.addTask {
-                let items = await scanPreviews(now: referenceDate)
-                return (.previews, items, nil)
-            }
-
-            group.addTask {
-                let items = await scanArchivesAndCaches()
-                return (.archivesAndCaches, items, nil)
-            }
-
-            var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
-            var warnings: [String] = []
-
-            for await case let (category, items, warning)? in group {
-                itemsByCategory[category] = items
-                if let warning {
-                    warnings.append(warning)
-                }
-                // Awaited, so no progress update can outlive the scan.
-                await onProgress(category, items)
-            }
-
-            return ScanSnapshot(
-                itemsByCategory: itemsByCategory,
-                diskAvailableBytes: capacity.available,
-                diskTotalBytes: capacity.total,
-                warnings: warnings
-            )
-        }
-
-        // A cancelled scan is incomplete; never hand it back as a finished result.
-        try Task.checkCancellation()
-        return snapshot
+    /// Scans all storage categories concurrently, streaming per-category results as they finish
+    /// followed by a single `.completed(ScanSnapshot)` stamped with `now()`.
+    /// When cancellation is observed during `next()`, child scan tasks are cancelled, full producer
+    /// teardown is awaited, and `CancellationError` is thrown. Breaking out of iteration early
+    /// requests producer cancellation on iterator release without awaiting teardown or throwing.
+    func scan() -> some AsyncSequence<ScanEvent, any Error> & Sendable {
+        StructuredScanStream(storage: self)
     }
 
     // MARK: - Deletion
 
-    func delete(
-        items: [StorageItem],
-        onProgress: @escaping @Sendable (DeletionProgress) async -> Void
-    ) async -> DeletionReport {
-        var deletedCount = 0
-        var trashedCount = 0
-        var simctlDeletedCount = 0
-        var reclaimedBytes: Int64 = 0
-        var removedItemIDs: Set<StorageItem.ID> = []
-        var failures: [DeletionFailure] = []
-
-        let total = items.count
-        for (index, item) in items.enumerated() {
-            await onProgress(
-                DeletionProgress(
-                    completedCount: index,
-                    totalCount: total,
-                    currentItemName: item.name,
-                    removedBytes: reclaimedBytes,
-                    removedItemID: nil
-                )
-            )
-
-            var removedID: StorageItem.ID?
-            do {
-                switch item.deletionMethod {
-                case let .trashFile(url):
-                    try await fileTrasher.trashItem(at: url)
-                    deletedCount += 1
-                    trashedCount += 1
-                    reclaimedBytes += item.sizeBytes
-                    removedItemIDs.insert(item.id)
-                    removedID = item.id
-
-                case let .simctlDevice(udid, isBooted):
-                    try await deleteSimulatorDevice(udid: udid, isBooted: isBooted)
-                    deletedCount += 1
-                    simctlDeletedCount += 1
-                    reclaimedBytes += item.sizeBytes
-                    removedItemIDs.insert(item.id)
-                    removedID = item.id
-
-                case let .simctlRuntime(identifier):
-                    try await deleteSimulatorRuntime(identifier: identifier)
-                    deletedCount += 1
-                    simctlDeletedCount += 1
-                    reclaimedBytes += item.sizeBytes
-                    removedItemIDs.insert(item.id)
-                    removedID = item.id
-
-                case let .notDeletable(reason):
-                    failures.append(DeletionFailure(itemID: item.id, itemName: item.name, reason: reason))
-                }
-            } catch {
-                failures.append(
-                    DeletionFailure(
-                        itemID: item.id,
-                        itemName: item.name,
-                        reason: error.localizedDescription
-                    )
-                )
-            }
-
-            await onProgress(
-                DeletionProgress(
-                    completedCount: index + 1,
-                    totalCount: total,
-                    currentItemName: item.name,
-                    removedBytes: reclaimedBytes,
-                    removedItemID: removedID
-                )
-            )
-        }
-
-        return DeletionReport(
-            deletedCount: deletedCount,
-            trashedCount: trashedCount,
-            simctlDeletedCount: simctlDeletedCount,
-            reclaimedBytes: reclaimedBytes,
-            removedItemIDs: removedItemIDs,
-            failures: failures
-        )
+    /// Deletes items sequentially in input order, streaming start and per-item outcomes followed
+    /// by `.completed(DeletionReport)`. Pull-based iteration provides natural backpressure.
+    /// Cancellation is cooperative: once observed, no subsequent items are started and `CancellationError`
+    /// is never recorded as a `DeletionFailure`; an in-flight `FileTrashing` move that cannot be interrupted
+    /// may complete and emit its outcome before cancellation is thrown on the next pull.
+    func delete(items: [StorageItem]) -> some AsyncSequence<DeletionEvent, any Error> & Sendable {
+        DeletionStream(storage: self, items: items)
     }
 
     // MARK: - Shared Internal Helpers
@@ -218,7 +90,8 @@ struct XcodeStorage: Sendable {
         await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for input in inputs {
                 group.addTask {
-                    inspect(input)
+                    guard !Task.isCancelled else { return nil }
+                    return inspect(input)
                 }
             }
 
@@ -253,7 +126,7 @@ struct XcodeStorage: Sendable {
         return .active
     }
 
-    private func readVolumeCapacity() -> (available: Int64?, total: Int64?) {
+    fileprivate func readVolumeCapacity() -> (available: Int64?, total: Int64?) {
         let targetURL = nearestExistingDirectory(from: xcodeRootURL)
             ?? FileManager.default.homeDirectoryForCurrentUser
         let values = try? targetURL.resourceValues(forKeys: [
@@ -276,5 +149,350 @@ struct XcodeStorage: Sendable {
             current = parent
         }
         return current
+    }
+}
+
+// MARK: - Private Structured Scan Stream
+
+private final class ScanProducerHandle: Sendable {
+    private let task: Task<Void, Never>
+
+    init(task: Task<Void, Never>) {
+        self.task = task
+    }
+
+    func cancel() {
+        task.cancel()
+    }
+
+    func waitForExit() async {
+        await task.value
+    }
+
+    deinit {
+        task.cancel()
+    }
+}
+
+private struct StructuredScanStream: AsyncSequence, Sendable {
+    typealias Element = ScanEvent
+
+    let storage: XcodeStorage
+
+    struct AsyncIterator: AsyncIteratorProtocol {
+        private var base: AsyncThrowingStream<ScanEvent, any Error>.AsyncIterator
+        private let producer: ScanProducerHandle
+        private var deliveredCompletion = false
+
+        init(storage: XcodeStorage) {
+            let (stream, continuation) = AsyncThrowingStream<ScanEvent, any Error>.makeStream()
+            let task = Task.detached(priority: .userInitiated) {
+                if Task.isCancelled {
+                    continuation.finish(throwing: CancellationError())
+                    return
+                }
+
+                let capacity = storage.readVolumeCapacity()
+                let referenceDate = storage.now()
+
+                let snapshot = await withTaskGroup(
+                    of: (StorageCategory, [StorageItem], String?)?.self,
+                    returning: ScanSnapshot.self
+                ) { group in
+                    group.addTask {
+                        guard !Task.isCancelled else { return nil }
+                        let items = await storage.scanDerivedData(now: referenceDate)
+                        guard !Task.isCancelled else { return nil }
+                        return (.derivedData, items, nil)
+                    }
+
+                    group.addTask {
+                        do {
+                            let items = try await storage.scanSimulatorDevices(now: referenceDate)
+                            return (.simulatorDevices, items, nil)
+                        } catch is CancellationError {
+                            return nil
+                        } catch {
+                            return (.simulatorDevices, [], "Simulator Devices: \(error.localizedDescription)")
+                        }
+                    }
+
+                    group.addTask {
+                        do {
+                            let items = try await storage.scanSimulatorRuntimes(now: referenceDate)
+                            return (.simulatorRuntimes, items, nil)
+                        } catch is CancellationError {
+                            return nil
+                        } catch {
+                            return (.simulatorRuntimes, [], "Simulator Runtimes: \(error.localizedDescription)")
+                        }
+                    }
+
+                    group.addTask {
+                        guard !Task.isCancelled else { return nil }
+                        let items = await storage.scanDeviceSupport(now: referenceDate)
+                        guard !Task.isCancelled else { return nil }
+                        return (.deviceSupport, items, nil)
+                    }
+
+                    group.addTask {
+                        guard !Task.isCancelled else { return nil }
+                        let items = await storage.scanPreviews(now: referenceDate)
+                        guard !Task.isCancelled else { return nil }
+                        return (.previews, items, nil)
+                    }
+
+                    group.addTask {
+                        guard !Task.isCancelled else { return nil }
+                        let items = await storage.scanArchivesAndCaches()
+                        guard !Task.isCancelled else { return nil }
+                        return (.archivesAndCaches, items, nil)
+                    }
+
+                    var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
+                    var warnings: [String] = []
+
+                    for await case let (category, items, warning)? in group {
+                        if Task.isCancelled {
+                            continue
+                        }
+                        itemsByCategory[category] = items
+                        if let warning {
+                            warnings.append(warning)
+                        }
+                        continuation.yield(.categoryScanned(category, items))
+                    }
+
+                    return ScanSnapshot(
+                        scannedAt: referenceDate,
+                        itemsByCategory: itemsByCategory,
+                        diskAvailableBytes: capacity.available,
+                        diskTotalBytes: capacity.total,
+                        warnings: warnings
+                    )
+                }
+
+                if Task.isCancelled {
+                    continuation.finish(throwing: CancellationError())
+                } else {
+                    continuation.yield(.completed(snapshot))
+                    continuation.finish()
+                }
+            }
+
+            let producer = ScanProducerHandle(task: task)
+            continuation.onTermination = { @Sendable _ in
+                producer.cancel()
+            }
+
+            base = stream.makeAsyncIterator()
+            self.producer = producer
+        }
+
+        mutating func next() async throws -> ScanEvent? {
+            if deliveredCompletion {
+                await producer.waitForExit()
+                return nil
+            }
+
+            if Task.isCancelled {
+                producer.cancel()
+                await producer.waitForExit()
+                throw CancellationError()
+            }
+
+            let producer = self.producer
+            do {
+                let event = try await withTaskCancellationHandler {
+                    try await base.next()
+                } onCancel: {
+                    producer.cancel()
+                }
+
+                if Task.isCancelled {
+                    producer.cancel()
+                    await producer.waitForExit()
+                    throw CancellationError()
+                }
+
+                if case .completed = event {
+                    deliveredCompletion = true
+                }
+                if event == nil {
+                    await producer.waitForExit()
+                }
+                return event
+            } catch is CancellationError {
+                producer.cancel()
+                await producer.waitForExit()
+                throw CancellationError()
+            }
+        }
+    }
+
+    func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(storage: storage)
+    }
+}
+
+// MARK: - Private Pull-Based Deletion Stream
+
+private struct DeletionStream: AsyncSequence, Sendable {
+    typealias Element = DeletionEvent
+
+    let storage: XcodeStorage
+    let items: [StorageItem]
+
+    struct AsyncIterator: AsyncIteratorProtocol {
+        private enum Phase {
+            case beforeItem(Int)
+            case executeItem(Int)
+            case finish
+            case done
+        }
+
+        private let storage: XcodeStorage
+        private let items: [StorageItem]
+        private var phase: Phase
+        private var deletedCount = 0
+        private var trashedCount = 0
+        private var simctlDeletedCount = 0
+        private var reclaimedBytes: Int64 = 0
+        private var removedItemIDs: Set<StorageItem.ID> = []
+        private var failures: [DeletionFailure] = []
+
+        init(storage: XcodeStorage, items: [StorageItem]) {
+            self.storage = storage
+            self.items = items
+            phase = items.isEmpty ? .finish : .beforeItem(0)
+        }
+
+        mutating func next() async throws -> DeletionEvent? {
+            if Task.isCancelled {
+                phase = .done
+                throw CancellationError()
+            }
+
+            switch phase {
+            case .done:
+                return nil
+
+            case let .beforeItem(index):
+                phase = .executeItem(index)
+                let item = items[index]
+                let progress = DeletionProgress(
+                    completedCount: index,
+                    totalCount: items.count,
+                    currentItemName: item.name,
+                    removedBytes: reclaimedBytes
+                )
+                return .starting(progress)
+
+            case let .executeItem(index):
+                let item = items[index]
+                phase = index + 1 < items.count ? .beforeItem(index + 1) : .finish
+
+                do {
+                    switch item.deletionMethod {
+                    case let .trashFile(url):
+                        try await storage.fileTrasher.trashItem(at: url)
+                        deletedCount += 1
+                        trashedCount += 1
+                        reclaimedBytes += item.sizeBytes
+                        removedItemIDs.insert(item.id)
+                        return .deleted(
+                            itemID: item.id,
+                            progress: DeletionProgress(
+                                completedCount: index + 1,
+                                totalCount: items.count,
+                                currentItemName: item.name,
+                                removedBytes: reclaimedBytes
+                            )
+                        )
+
+                    case let .simctlDevice(udid, isBooted):
+                        try await storage.deleteSimulatorDevice(udid: udid, isBooted: isBooted)
+                        deletedCount += 1
+                        simctlDeletedCount += 1
+                        reclaimedBytes += item.sizeBytes
+                        removedItemIDs.insert(item.id)
+                        return .deleted(
+                            itemID: item.id,
+                            progress: DeletionProgress(
+                                completedCount: index + 1,
+                                totalCount: items.count,
+                                currentItemName: item.name,
+                                removedBytes: reclaimedBytes
+                            )
+                        )
+
+                    case let .simctlRuntime(identifier):
+                        try await storage.deleteSimulatorRuntime(identifier: identifier)
+                        deletedCount += 1
+                        simctlDeletedCount += 1
+                        reclaimedBytes += item.sizeBytes
+                        removedItemIDs.insert(item.id)
+                        return .deleted(
+                            itemID: item.id,
+                            progress: DeletionProgress(
+                                completedCount: index + 1,
+                                totalCount: items.count,
+                                currentItemName: item.name,
+                                removedBytes: reclaimedBytes
+                            )
+                        )
+
+                    case let .notDeletable(reason):
+                        let failure = DeletionFailure(itemID: item.id, itemName: item.name, reason: reason)
+                        failures.append(failure)
+                        return .failed(
+                            failure,
+                            progress: DeletionProgress(
+                                completedCount: index + 1,
+                                totalCount: items.count,
+                                currentItemName: item.name,
+                                removedBytes: reclaimedBytes
+                            )
+                        )
+                    }
+                } catch is CancellationError {
+                    phase = .done
+                    throw CancellationError()
+                } catch {
+                    let failure = DeletionFailure(
+                        itemID: item.id,
+                        itemName: item.name,
+                        reason: error.localizedDescription
+                    )
+                    failures.append(failure)
+                    return .failed(
+                        failure,
+                        progress: DeletionProgress(
+                            completedCount: index + 1,
+                            totalCount: items.count,
+                            currentItemName: item.name,
+                            removedBytes: reclaimedBytes
+                        )
+                    )
+                }
+
+            case .finish:
+                phase = .done
+                return .completed(
+                    DeletionReport(
+                        deletedCount: deletedCount,
+                        trashedCount: trashedCount,
+                        simctlDeletedCount: simctlDeletedCount,
+                        reclaimedBytes: reclaimedBytes,
+                        removedItemIDs: removedItemIDs,
+                        failures: failures
+                    )
+                )
+            }
+        }
+    }
+
+    func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(storage: storage, items: items)
     }
 }

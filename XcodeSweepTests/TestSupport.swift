@@ -198,9 +198,12 @@ struct PendingCommandHandle: Sendable {
 }
 
 actor ControllableCommandRunner: CommandRunning {
+    private(set) var recordedArguments: [[String]] = []
     private var queuedHandles: [PendingCommandHandle] = []
     private var inFlightCalls: [UUID: CheckedContinuation<CommandOutput, any Error>] = [:]
     private var waiters: [(id: UUID, continuation: CheckedContinuation<PendingCommandHandle, any Error>)] = []
+    private var cancelledCallIDs: Set<UUID> = []
+    private var cancellationWaiters: [UUID: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)]] = [:]
 
     var hasParkedCall: Bool {
         !inFlightCalls.isEmpty
@@ -211,6 +214,7 @@ actor ControllableCommandRunner: CommandRunning {
     }
 
     func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+        recordedArguments.append(arguments)
         let callID = UUID()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -259,10 +263,49 @@ actor ControllableCommandRunner: CommandRunning {
         continuation.resume(with: result)
     }
 
+    func waitForCancellation(id: UUID) async throws {
+        if cancelledCallIDs.contains(id) {
+            return
+        }
+        let waiterID = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                if cancelledCallIDs.contains(id) {
+                    continuation.resume()
+                } else {
+                    cancellationWaiters[id, default: []].append((waiterID, continuation))
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelCancellationWaiter(callID: id, waiterID: waiterID) }
+        }
+    }
+
     private func cancelCall(id: UUID) {
         queuedHandles.removeAll { $0.id == id }
+        cancelledCallIDs.insert(id)
+        for waiter in cancellationWaiters.removeValue(forKey: id) ?? [] {
+            waiter.continuation.resume()
+        }
         guard let continuation = inFlightCalls.removeValue(forKey: id) else { return }
         continuation.resume(throwing: CancellationError())
+    }
+
+    private func cancelCancellationWaiter(callID: UUID, waiterID: UUID) {
+        guard var waiters = cancellationWaiters[callID],
+              let index = waiters.firstIndex(where: { $0.id == waiterID })
+        else { return }
+        let waiter = waiters.remove(at: index)
+        if waiters.isEmpty {
+            cancellationWaiters.removeValue(forKey: callID)
+        } else {
+            cancellationWaiters[callID] = waiters
+        }
+        waiter.continuation.resume(throwing: CancellationError())
     }
 
     private func cancelWaiter(id: UUID) {
@@ -308,10 +351,6 @@ actor ControllableFileTrasher: FileTrashing {
     private var queuedHandles: [PendingTrashHandle] = []
     private var inFlightCalls: [UUID: (url: URL, continuation: CheckedContinuation<Void, any Error>)] = [:]
     private var waiters: [(id: UUID, continuation: CheckedContinuation<PendingTrashHandle, any Error>)] = []
-
-    var hasParkedCall: Bool {
-        !inFlightCalls.isEmpty
-    }
 
     var hasRegisteredWaiter: Bool {
         !waiters.isEmpty
@@ -384,14 +423,14 @@ actor ControllableFileTrasher: FileTrashing {
 
 // MARK: - Async Utilities
 
-actor ProgressRecorder {
-    private var events: [DeletionProgress] = []
+actor EventRecorder<Event: Sendable> {
+    private var events: [Event] = []
 
-    func append(_ progress: DeletionProgress) {
-        events.append(progress)
+    func append(_ event: Event) {
+        events.append(event)
     }
 
-    func snapshot() -> [DeletionProgress] {
+    func snapshot() -> [Event] {
         events
     }
 }

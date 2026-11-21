@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StorageItemInspectorView: View {
     let selectedItems: [StorageItem]
+    let canDelete: Bool
     let onDelete: ([StorageItem]) -> Void
 
     var body: some View {
@@ -13,9 +14,9 @@ struct StorageItemInspectorView: View {
                 description: Text("Select an item to inspect its path, status, and cleanup method.")
             )
         } else if selectedItems.count == 1, let item = selectedItems.first {
-            SingleItemInspectorContent(item: item, onDelete: { onDelete([item]) })
+            SingleItemInspectorContent(item: item, canDelete: canDelete, onDelete: { onDelete([item]) })
         } else {
-            MultiItemInspectorContent(items: selectedItems, onDelete: { onDelete(selectedItems) })
+            MultiItemInspectorContent(items: selectedItems, canDelete: canDelete, onDelete: { onDelete(selectedItems) })
         }
     }
 }
@@ -24,6 +25,7 @@ struct StorageItemInspectorView: View {
 
 private struct SingleItemInspectorContent: View {
     let item: StorageItem
+    let canDelete: Bool
     let onDelete: () -> Void
 
     var body: some View {
@@ -90,6 +92,7 @@ private struct SingleItemInspectorContent: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
+                        .disabled(!canDelete)
                     }
                 }
             }
@@ -115,6 +118,7 @@ private struct SingleItemInspectorContent: View {
 
 private struct MultiItemInspectorContent: View {
     let items: [StorageItem]
+    let canDelete: Bool
     let onDelete: () -> Void
 
     private var deletableItems: [StorageItem] {
@@ -165,7 +169,7 @@ private struct MultiItemInspectorContent: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.red)
-            .disabled(deletableItems.isEmpty)
+            .disabled(deletableItems.isEmpty || !canDelete)
         }
         .padding(16)
     }

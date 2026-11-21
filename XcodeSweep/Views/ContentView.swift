@@ -21,6 +21,7 @@ struct ContentView: View {
         .inspector(isPresented: $bindableStore.inspectorPresented) {
             StorageItemInspectorView(
                 selectedItems: store.selectedItems,
+                canDelete: store.canDelete,
                 onDelete: { store.requestDelete(items: $0) }
             )
             .inspectorColumnWidth(min: 250, ideal: 300, max: 400)
@@ -34,7 +35,7 @@ struct ContentView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .disabled(store.isScanning || store.isDeleting)
+                .disabled(!store.canRefresh)
                 .help("Rescan Xcode storage (⌘R)")
 
                 Button {
@@ -69,9 +70,7 @@ struct ContentView: View {
             Text(message)
         }
         .task {
-            if store.summary.scannedAt == .distantPast {
-                await store.refresh()
-            }
+            await store.refreshIfNeeded()
         }
     }
 

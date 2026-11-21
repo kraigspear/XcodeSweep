@@ -7,7 +7,7 @@ import Testing
 struct XcodeStorageTests {
     // MARK: - Scanning Across All 6 Categories
 
-    @Test("Scans all six storage categories, enforces per-category staleness rules, and reports progress")
+    @Test("Scans all six storage categories, enforces per-category staleness rules, and streams ordered events")
     func scanAllCategoriesEndToEnd() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
@@ -172,12 +172,25 @@ struct XcodeStorageTests {
             now: { referenceNow }
         )
 
-        let reportedCategories = CategoryCollector()
-        let snapshot = try await storage.scanAll { category, _ in
-            Task { await reportedCategories.insert(category) }
+        var reportedCategories: Set<StorageCategory> = []
+        var completedSnapshots: [ScanSnapshot] = []
+
+        for try await event in storage.scan() {
+            switch event {
+            case let .categoryScanned(category, _):
+                #expect(completedSnapshots.isEmpty)
+                reportedCategories.insert(category)
+            case let .completed(snapshot):
+                completedSnapshots.append(snapshot)
+            }
         }
 
-        // Volume capacity should be populated from the local volume hosting xcodeRootURL.
+        #expect(reportedCategories == Set(StorageCategory.allCases))
+        #expect(completedSnapshots.count == 1)
+        let snapshot = try #require(completedSnapshots.first)
+
+        // Volume capacity and injected clock timestamp should be populated on the snapshot.
+        #expect(snapshot.scannedAt == referenceNow)
         #expect(snapshot.warnings.isEmpty)
         #expect((snapshot.diskTotalBytes ?? 0) > 0)
 
@@ -234,15 +247,10 @@ struct XcodeStorageTests {
         #expect(extrasByName["ModuleCache.noindex"]?.status == .stale)
         #expect(extrasByName["ReleaseApp"]?.status == .active)
         #expect(extrasByName["ReleaseApp"]?.subtitle == "v2.4.0 (42)")
-
-        // Wait briefly for progress tasks to complete and verify all 6 categories were reported.
-        try await waitUntil("all 6 categories reported") {
-            await reportedCategories.count == StorageCategory.allCases.count
-        }
     }
 
-    @Test("Records warnings instead of failing scanAll when simctl fails")
-    func scanAllCapturesSimctlWarnings() async throws {
+    @Test("Records warnings instead of failing scan when simctl fails")
+    func scanCapturesSimctlWarnings() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
 
@@ -255,7 +263,7 @@ struct XcodeStorageTests {
             fileTrasher: RecordingFileTrasher()
         )
 
-        let snapshot = try await storage.scanAll { _, _ in }
+        let snapshot = try await finalScanSnapshot(from: storage)
 
         #expect(snapshot.itemsByCategory[.simulatorDevices] == [])
         #expect(snapshot.itemsByCategory[.simulatorRuntimes] == [])
@@ -264,20 +272,21 @@ struct XcodeStorageTests {
 
     // MARK: - Deletion Through OS-Edge Seams
 
-    @Test("Trashes filesystem items through FileTrashing adapter and records partial failures")
+    @Test("Trashes filesystem items through FileTrashing adapter and streams per-item outcomes")
     func deleteTrashesFilesAndRecordsFailure() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
 
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
         let goodURL = try fixture.addDerivedData(
             folderName: "Good-1",
             workspacePath: "/nonexistent/Good.xcodeproj",
-            lastAccessed: Date()
+            lastAccessed: now
         )
         let badURL = try fixture.addDerivedData(
             folderName: "Locked-2",
             workspacePath: "/nonexistent/Locked.xcodeproj",
-            lastAccessed: Date()
+            lastAccessed: now
         )
 
         let trasher = RecordingFileTrasher(failingURLs: [badURL])
@@ -287,31 +296,45 @@ struct XcodeStorageTests {
             fileTrasher: trasher
         )
 
-        let snapshot = try await storage.scanAll { _, _ in }
+        let snapshot = try await finalScanSnapshot(from: storage)
         let items = try #require(snapshot.itemsByCategory[.derivedData])
             .sorted { $0.name < $1.name }
 
-        let recorder = ProgressRecorder()
-        let report = await storage.delete(items: items) { progress in
-            await recorder.append(progress)
+        var events: [DeletionEvent] = []
+        for try await event in storage.delete(items: items) {
+            events.append(event)
         }
 
         let trashed = await trasher.trashedURLs
         #expect(trashed == [goodURL])
+        #expect(events.count == 5)
+
+        guard case let .starting(startFirst) = events[0],
+              case let .deleted(deletedID, afterFirst) = events[1],
+              case let .starting(startSecond) = events[2],
+              case let .failed(failure, afterSecond) = events[3],
+              case let .completed(report) = events[4]
+        else {
+            Issue.record("Unexpected deletion event sequence: \(events)")
+            return
+        }
+
+        #expect(startFirst.completedCount == 0)
+        #expect(deletedID == "derivedData:\(goodURL.path)")
+        #expect(afterFirst.completedCount == 1)
+        #expect(startSecond.completedCount == 1)
+        #expect(failure.itemID == "derivedData:\(badURL.path)")
+        #expect(afterSecond.completedCount == 2)
+
         #expect(report.deletedCount == 1)
         #expect(report.trashedCount == 1)
         #expect(report.simctlDeletedCount == 0)
         #expect(report.removedItemIDs == ["derivedData:\(goodURL.path)"])
         #expect(report.failures.map(\.itemID) == ["derivedData:\(badURL.path)"])
-
-        let events = await recorder.snapshot()
-        #expect(events.count == 4)
-        #expect(events[1].removedItemID == "derivedData:\(goodURL.path)")
-        #expect(events[3].removedItemID == nil)
     }
 
     @Test(
-        "Emits ordered start and completion progress across a suspended simctl deletion and handles failures",
+        "Emits ordered start and outcome events across a suspended simctl deletion and handles failures",
         .timeLimit(.minutes(1))
     )
     func deleteEmitsOrderedProgressAcrossSuspensionAndFailure() async throws {
@@ -361,24 +384,28 @@ struct XcodeStorageTests {
             metadata: []
         )
 
-        let recordedEvents = ProgressRecorder()
-
-        async let pendingReport = storage.delete(items: [bootedDevice, failingRuntime, protectedRuntime]) { progress in
-            await recordedEvents.append(progress)
+        let recorder = EventRecorder<DeletionEvent>()
+        let deletionTask = Task {
+            for try await event in storage.delete(items: [bootedDevice, failingRuntime, protectedRuntime]) {
+                await recorder.append(event)
+            }
         }
+        defer { deletionTask.cancel() }
 
         let firstCall = try await controller.nextPendingCall()
         #expect(firstCall.arguments == ["simctl", "shutdown", "UDID-1"])
 
-        let eventsWhileSuspended = await recordedEvents.snapshot()
-        #expect(eventsWhileSuspended.count == 1)
-        #expect(eventsWhileSuspended.first == DeletionProgress(
-            completedCount: 0,
-            totalCount: 3,
-            currentItemName: "iPhone 17 Pro",
-            removedBytes: 0,
-            removedItemID: nil
-        ))
+        let eventsWhileSuspended = await recorder.snapshot()
+        #expect(eventsWhileSuspended == [
+            .starting(
+                DeletionProgress(
+                    completedCount: 0,
+                    totalCount: 3,
+                    currentItemName: "iPhone 17 Pro",
+                    removedBytes: 0
+                )
+            ),
+        ])
 
         await controller.resumeCall(
             id: firstCall.id,
@@ -395,34 +422,49 @@ struct XcodeStorageTests {
         let thirdCall = try await controller.nextPendingCall()
         #expect(thirdCall.arguments == ["simctl", "runtime", "delete", "RT-2"])
 
-        let eventsBeforeFailureResolves = await recordedEvents.snapshot()
-        #expect(eventsBeforeFailureResolves.count == 3)
-        #expect(eventsBeforeFailureResolves[1] == DeletionProgress(
-            completedCount: 1,
-            totalCount: 3,
-            currentItemName: "iPhone 17 Pro",
-            removedBytes: 4_000_000_000,
-            removedItemID: "sim-1"
-        ))
-        #expect(eventsBeforeFailureResolves[2] == DeletionProgress(
-            completedCount: 1,
-            totalCount: 3,
-            currentItemName: "iOS 26.4",
-            removedBytes: 4_000_000_000,
-            removedItemID: nil
-        ))
+        let eventsBeforeFailureResolves = await recorder.snapshot()
+        #expect(eventsBeforeFailureResolves == [
+            .starting(
+                DeletionProgress(completedCount: 0, totalCount: 3, currentItemName: "iPhone 17 Pro", removedBytes: 0)
+            ),
+            .deleted(
+                itemID: "sim-1",
+                progress: DeletionProgress(
+                    completedCount: 1,
+                    totalCount: 3,
+                    currentItemName: "iPhone 17 Pro",
+                    removedBytes: 4_000_000_000
+                )
+            ),
+            .starting(
+                DeletionProgress(
+                    completedCount: 1,
+                    totalCount: 3,
+                    currentItemName: "iOS 26.4",
+                    removedBytes: 4_000_000_000
+                )
+            ),
+        ])
 
         await controller.resumeCall(
             id: thirdCall.id,
             with: .failure(ProcessRunnerError.nonZeroExit(command: "xcrun", status: 1, stderr: "runtime busy"))
         )
 
-        let report = await pendingReport
-        let allEvents = await recordedEvents.snapshot()
+        try await deletionTask.value
+        let allEvents = await recorder.snapshot()
 
-        #expect(allEvents.count == 6)
-        #expect(allEvents[3].removedItemID == nil)
-        #expect(allEvents[5].removedItemID == nil)
+        #expect(allEvents.count == 7)
+        guard case let .failed(runtimeFailure, _) = allEvents[3],
+              case let .failed(protectedFailure, _) = allEvents[5],
+              case let .completed(report) = allEvents[6]
+        else {
+            Issue.record("Unexpected tail events: \(allEvents)")
+            return
+        }
+
+        #expect(runtimeFailure.itemID == "rt-2")
+        #expect(protectedFailure.itemID == "rt-3")
         #expect(report.deletedCount == 1)
         #expect(report.trashedCount == 0)
         #expect(report.simctlDeletedCount == 1)
@@ -432,18 +474,19 @@ struct XcodeStorageTests {
     }
 
     @Test(
-        "Cancelling while parked inside CommandRunning exits promptly instead of hanging",
+        "Cancelling during booted simctl shutdown stops immediately without deleting or starting remaining items",
         .timeLimit(.minutes(1))
     )
-    func cancelledDeletionExitsImmediately() async throws {
+    func cancelledDeletionStopsImmediatelyWithoutFailureOrRemainingItems() async throws {
         let controller = ControllableCommandRunner()
+        let trasher = RecordingFileTrasher()
         let storage = XcodeStorage(
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: trasher
         )
 
-        let device = StorageItem(
-            id: "sim-extra",
+        let bootedDevice = StorageItem(
+            id: "sim-booted",
             category: .simulatorDevices,
             name: "iPhone 17",
             subtitle: "iOS 27.2",
@@ -451,63 +494,203 @@ struct XcodeStorageTests {
             lastUsedDate: nil,
             path: nil,
             workspacePath: nil,
-            status: .unavailable,
-            deletionMethod: .simctlDevice(udid: "UDID-EXTRA", isBooted: false),
+            status: .booted,
+            deletionMethod: .simctlDevice(udid: "UDID-BOOTED", isBooted: true),
+            metadata: []
+        )
+        let trailingFile = StorageItem(
+            id: "file-trailing",
+            category: .derivedData,
+            name: "TrailingApp",
+            subtitle: "Orphaned",
+            sizeBytes: 500_000_000,
+            lastUsedDate: nil,
+            path: URL(fileURLWithPath: "/tmp/trailing"),
+            workspacePath: nil,
+            status: .orphaned,
+            deletionMethod: .trashFile(URL(fileURLWithPath: "/tmp/trailing")),
             metadata: []
         )
 
-        let outerTask = Task { () -> DeletionReport in
-            await storage.delete(items: [device]) { _ in }
+        let recorder = EventRecorder<DeletionEvent>()
+        let deleteTask = Task {
+            for try await event in storage.delete(items: [bootedDevice, trailingFile]) {
+                await recorder.append(event)
+            }
         }
-        defer { outerTask.cancel() }
+        defer { deleteTask.cancel() }
 
-        try await waitUntil("worker parked in command runner") {
-            await controller.hasParkedCall
+        let shutdownCall = try await controller.nextPendingCall()
+        #expect(shutdownCall.arguments == ["simctl", "shutdown", "UDID-BOOTED"])
+
+        deleteTask.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            try await deleteTask.value
         }
-        outerTask.cancel()
 
-        let report = await outerTask.value
-        #expect(report.deletedCount == 0)
-        #expect(report.failures.map(\.itemID) == ["sim-extra"])
+        // Shutdown cancellation must not fall through to `simctl delete` or touch trailing items.
+        #expect(await controller.recordedArguments == [["simctl", "shutdown", "UDID-BOOTED"]])
+        #expect(await !controller.hasParkedCall)
+        #expect(await trasher.trashedURLs.isEmpty)
+
+        let events = await recorder.snapshot()
+        #expect(events == [
+            .starting(
+                DeletionProgress(completedCount: 0, totalCount: 2, currentItemName: "iPhone 17", removedBytes: 0)
+            ),
+        ])
     }
 
     @Test(
-        "Throws CancellationError and reports no simulator progress when cancelled during simctl",
+        "Cancelling during booted shutdown skips simctl delete even if shutdown returns normally",
+        .timeLimit(.minutes(1))
+    )
+    func cancelledShutdownReturningNormallyStillSkipsDelete() async throws {
+        let runner = IgnoreCancelShutdownRunner()
+        let storage = XcodeStorage(
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        let bootedDevice = StorageItem(
+            id: "sim-booted",
+            category: .simulatorDevices,
+            name: "iPhone 17",
+            subtitle: "iOS 27.2",
+            sizeBytes: 1_000_000_000,
+            lastUsedDate: nil,
+            path: nil,
+            workspacePath: nil,
+            status: .booted,
+            deletionMethod: .simctlDevice(udid: "UDID-BOOTED", isBooted: true),
+            metadata: []
+        )
+
+        let deleteTask = Task {
+            for try await _ in storage.delete(items: [bootedDevice]) {}
+        }
+        defer { deleteTask.cancel() }
+
+        await runner.waitUntilStarted()
+        deleteTask.cancel()
+        await runner.finishNormally()
+
+        await #expect(throws: CancellationError.self) {
+            try await deleteTask.value
+        }
+
+        #expect(await runner.recordedArguments == [["simctl", "shutdown", "UDID-BOOTED"]])
+    }
+
+    @Test(
+        "Cancelling between receiving .starting and pulling execution never touches FileTrashing",
+        .timeLimit(.minutes(1))
+    )
+    func cancelledBetweenStartingAndExecutionNeverTouchesTrasher() async throws {
+        let trasher = RecordingFileTrasher()
+        let storage = XcodeStorage(
+            commandRunner: StubCommandRunner(),
+            fileTrasher: trasher
+        )
+
+        let item = StorageItem(
+            id: "file-1",
+            category: .derivedData,
+            name: "SampleApp",
+            subtitle: "Orphaned",
+            sizeBytes: 1000,
+            lastUsedDate: nil,
+            path: URL(fileURLWithPath: "/tmp/sample"),
+            workspacePath: nil,
+            status: .orphaned,
+            deletionMethod: .trashFile(URL(fileURLWithPath: "/tmp/sample")),
+            metadata: []
+        )
+
+        let sawStarting = AsyncSignal()
+        let proceedAfterCancel = AsyncSignal()
+
+        let deleteTask = Task {
+            var iterator = storage.delete(items: [item]).makeAsyncIterator()
+            let first = try await iterator.next()
+            #expect(first == .starting(
+                DeletionProgress(completedCount: 0, totalCount: 1, currentItemName: "SampleApp", removedBytes: 0)
+            ))
+            await sawStarting.signal()
+            await proceedAfterCancel.wait()
+            _ = try await iterator.next()
+        }
+        defer { deleteTask.cancel() }
+
+        await sawStarting.wait()
+        deleteTask.cancel()
+        await proceedAfterCancel.signal()
+
+        await #expect(throws: CancellationError.self) {
+            try await deleteTask.value
+        }
+        #expect(await trasher.trashedURLs.isEmpty)
+    }
+
+    @Test(
+        "Throws CancellationError and awaits full producer teardown before consumer exits",
         .timeLimit(.minutes(1))
     )
     func scanCancelledDuringSimctlThrowsWithoutSimulatorProgress() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
 
-        let controller = ControllableCommandRunner()
+        let timeline = OSAllocatedUnfairLock<[String]>(initialState: [])
+        let runner = GatedCleanupCommandRunner(expectedCalls: 2, timeline: timeline)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
-            commandRunner: controller,
+            commandRunner: runner,
             fileTrasher: RecordingFileTrasher()
         )
-        let reportedCategories = OSAllocatedUnfairLock<[StorageCategory]>(initialState: [])
+        let reportedEvents = OSAllocatedUnfairLock<[ScanEvent]>(initialState: [])
 
         let scanTask = Task {
-            try await storage.scanAll { category, _ in
-                reportedCategories.withLock { $0.append(category) }
+            defer {
+                timeline.withLock { $0.append("consumerExited") }
+            }
+            for try await event in storage.scan() {
+                reportedEvents.withLock { $0.append(event) }
             }
         }
         defer { scanTask.cancel() }
 
-        _ = try await controller.nextPendingCall()
-        _ = try await controller.nextPendingCall()
+        await runner.waitUntilAllCallsParked()
         scanTask.cancel()
+        await runner.waitUntilAllCallsObservedCancellation()
+
+        // Consumer must still be waiting on producer teardown until cleanup finishes.
+        #expect(timeline.withLock { $0 }.isEmpty)
+        await runner.releaseCleanup()
 
         await #expect(throws: CancellationError.self) {
-            _ = try await scanTask.value
+            try await scanTask.value
         }
-        let reported = reportedCategories.withLock { $0 }
-        #expect(!reported.contains(.simulatorDevices))
-        #expect(!reported.contains(.simulatorRuntimes))
+
+        #expect(timeline.withLock { $0 } == ["cleanupFinished", "cleanupFinished", "consumerExited"])
+
+        let events = reportedEvents.withLock { $0 }
+        for event in events {
+            switch event {
+            case let .categoryScanned(category, _):
+                #expect(category != .simulatorDevices)
+                #expect(category != .simulatorRuntimes)
+            case .completed:
+                Issue.record("Cancelled scan must not emit .completed")
+            }
+        }
     }
 
-    @Test("Finishes delivering every progress update before returning")
-    func scanAwaitsProgressDelivery() async throws {
+    @Test(
+        "Cancellation after receiving .completed finishes cleanly without throwing",
+        .timeLimit(.minutes(1))
+    )
+    func cancellationAfterCompletedReturnsNilWithoutThrowing() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
 
@@ -516,14 +699,66 @@ struct XcodeStorageTests {
             commandRunner: StubCommandRunner(),
             fileTrasher: RecordingFileTrasher()
         )
-        let deliveredCategories = OSAllocatedUnfairLock<Set<StorageCategory>>(initialState: [])
 
-        _ = try await storage.scanAll { category, _ in
-            try? await Task.sleep(for: .milliseconds(20))
-            deliveredCategories.withLock { _ = $0.insert(category) }
+        let sawCompleted = AsyncSignal()
+        let proceedAfterCancel = AsyncSignal()
+
+        let scanTask = Task { () -> ScanEvent? in
+            var iterator = storage.scan().makeAsyncIterator()
+            while let event = try await iterator.next() {
+                if case .completed = event {
+                    await sawCompleted.signal()
+                    await proceedAfterCancel.wait()
+                    return try await iterator.next()
+                }
+            }
+            return nil
+        }
+        defer { scanTask.cancel() }
+
+        await sawCompleted.wait()
+        scanTask.cancel()
+        await proceedAfterCancel.signal()
+
+        let trailing = try await scanTask.value
+        #expect(trailing == nil)
+    }
+
+    @Test(
+        "Breaking out of scan early cancels remaining in-flight simctl commands",
+        .timeLimit(.minutes(1))
+    )
+    func breakingOutOfScanEarlyCancelsRemainingWork() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        var parkedCalls: [PendingCommandHandle] = []
+        for try await event in storage.scan() {
+            if case .categoryScanned = event {
+                // Wait until both simctl calls are parked before breaking out of the loop.
+                try parkedCalls.append(await controller.nextPendingCall())
+                try parkedCalls.append(await controller.nextPendingCall())
+                break
+            }
         }
 
-        #expect(deliveredCategories.withLock { $0 } == Set(StorageCategory.allCases))
+        #expect(parkedCalls.count == 2)
+        // Breaking releases the iterator, whose producer handle cancels parked simctl calls.
+        for call in parkedCalls {
+            do {
+                try await controller.waitForCancellation(id: call.id)
+            } catch is CancellationError {
+                Issue.record("Parked command did not receive cancellation: \(call.arguments.joined(separator: " "))")
+                throw CancellationError()
+            }
+        }
     }
 
     // MARK: - Test Adapter Waiters
@@ -569,16 +804,155 @@ struct XcodeStorageTests {
             _ = try await waiterTask.value
         }
     }
+
+    // MARK: - Helpers
+
+    private func finalScanSnapshot(from storage: XcodeStorage) async throws -> ScanSnapshot {
+        var snapshot: ScanSnapshot?
+        for try await event in storage.scan() {
+            if case let .completed(final) = event {
+                snapshot = final
+            }
+        }
+        return try #require(snapshot)
+    }
 }
 
-private actor CategoryCollector {
-    private var categories: Set<StorageCategory> = []
+private actor AsyncSignal {
+    private var signalled = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    var count: Int {
-        categories.count
+    func signal() {
+        signalled = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
     }
 
-    func insert(_ category: StorageCategory) {
-        categories.insert(category)
+    func wait() async {
+        if signalled {
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            if signalled {
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+            }
+        }
+    }
+}
+
+private actor IgnoreCancelShutdownRunner: CommandRunning {
+    private(set) var recordedArguments: [[String]] = []
+    private let started = AsyncSignal()
+    private let release = AsyncSignal()
+
+    func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+        recordedArguments.append(arguments)
+        await started.signal()
+        await release.wait()
+        return CommandOutput(stdout: Data(), stderr: Data(), terminationStatus: 0)
+    }
+
+    func waitUntilStarted() async {
+        await started.wait()
+    }
+
+    func finishNormally() async {
+        await release.signal()
+    }
+}
+
+private actor GatedCleanupCommandRunner: CommandRunning {
+    private let expectedCalls: Int
+    private let timeline: OSAllocatedUnfairLock<[String]>
+    private var parkedCount = 0
+    private var parkedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancelledCount = 0
+    private var cancelledWaiters: [CheckedContinuation<Void, Never>] = []
+    private var inFlightParks: [UUID: CheckedContinuation<Void, Never>] = [:]
+    private let cleanupGate = AsyncSignal()
+
+    init(expectedCalls: Int, timeline: OSAllocatedUnfairLock<[String]>) {
+        self.expectedCalls = expectedCalls
+        self.timeline = timeline
+    }
+
+    func run(executableURL _: URL, arguments _: [String]) async throws -> CommandOutput {
+        let callID = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                parkedCount += 1
+                if parkedCount >= expectedCalls {
+                    let waiters = parkedWaiters
+                    parkedWaiters.removeAll()
+                    for waiter in waiters {
+                        waiter.resume()
+                    }
+                }
+                if Task.isCancelled {
+                    incrementCancelledCount()
+                    continuation.resume()
+                } else {
+                    inFlightParks[callID] = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelParkedCall(id: callID) }
+        }
+
+        await cleanupGate.wait()
+        timeline.withLock { $0.append("cleanupFinished") }
+        throw CancellationError()
+    }
+
+    func waitUntilAllCallsParked() async {
+        if parkedCount >= expectedCalls {
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            if parkedCount >= expectedCalls {
+                continuation.resume()
+            } else {
+                parkedWaiters.append(continuation)
+            }
+        }
+    }
+
+    func waitUntilAllCallsObservedCancellation() async {
+        if cancelledCount >= expectedCalls {
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            if cancelledCount >= expectedCalls {
+                continuation.resume()
+            } else {
+                cancelledWaiters.append(continuation)
+            }
+        }
+    }
+
+    func releaseCleanup() async {
+        await cleanupGate.signal()
+    }
+
+    private func cancelParkedCall(id: UUID) {
+        guard let continuation = inFlightParks.removeValue(forKey: id) else { return }
+        incrementCancelledCount()
+        continuation.resume()
+    }
+
+    private func incrementCancelledCount() {
+        cancelledCount += 1
+        if cancelledCount >= expectedCalls {
+            let waiters = cancelledWaiters
+            cancelledWaiters.removeAll()
+            for waiter in waiters {
+                waiter.resume()
+            }
+        }
     }
 }
