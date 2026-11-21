@@ -11,3 +11,11 @@ _Avoid_: StorageService, LiveStorageService, StorageManager, StorageEngine
 **StorageInventory**:
 The scanned items in every category together with the totals derived from them. Changing the items always produces a new inventory, so totals never disagree with the items.
 _Avoid_: ScanSummary, summary
+
+**Reclaimable**:
+An item that is deletable and whose status (orphaned, unavailable, or unused) is recommended for cleanup. The UI labels this "Recommended".
+_Avoid_: recommended, cleanup candidate (in code)
+
+**Protected**:
+A selected item that cannot be deleted, such as a system-managed simulator runtime. A deletion plan counts protected items but never deletes them.
+_Avoid_: non-deletable, locked

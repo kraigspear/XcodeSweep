@@ -35,6 +35,7 @@ enum OperationState: Equatable, Sendable {
         }
     }
 
+    /// Whether `category` is still waiting for its results in the current scan.
     func isScanning(_ category: StorageCategory) -> Bool {
         if case let .scanning(completed) = self {
             return !completed.contains(category)
@@ -43,6 +44,9 @@ enum OperationState: Equatable, Sendable {
     }
 }
 
+/// The app's observable state: the scanned inventory, navigation, selection, and the scan and deletion flows.
+///
+/// Scans and deletions never overlap; `operation` tracks which one, if any, is running.
 @MainActor
 @Observable
 final class XcodeSweepStore {
@@ -61,7 +65,9 @@ final class XcodeSweepStore {
     private(set) var operation: OperationState = .idle
     private(set) var inventory: StorageInventory = .empty
     private(set) var scanWarnings: [String] = []
+    /// The plan awaiting the user's confirmation; non-nil presents the confirmation dialog.
     var pendingDeletion: DeletionPlan?
+    /// The outcome of the last finished deletion; non-nil presents the completion alert.
     var lastDeletionReport: DeletionReport?
     var errorMessage: String?
 
@@ -77,10 +83,12 @@ final class XcodeSweepStore {
         operation.isDeleting
     }
 
+    /// Whether a scan can start; `false` while a scan or deletion is running.
     var canRefresh: Bool {
         operation == .idle
     }
 
+    /// Whether a deletion can start; `false` while a scan or deletion is running.
     var canDelete: Bool {
         operation == .idle
     }
@@ -93,6 +101,8 @@ final class XcodeSweepStore {
         operation.deletionProgress
     }
 
+    /// Categories whose results are in: those finished so far during a scan, otherwise every
+    /// category once any scan has completed.
     var completedCategories: Set<StorageCategory> {
         switch operation {
         case let .scanning(completed):
@@ -110,11 +120,16 @@ final class XcodeSweepStore {
 
     // MARK: - Scanning
 
+    /// Scans unless a scan has already completed.
     func refreshIfNeeded() async {
         guard !hasCompletedScan else { return }
         await refresh()
     }
 
+    /// Rescans all categories, updating the inventory as each category finishes.
+    ///
+    /// Does nothing while busy. If the scan fails or is cancelled, the previous inventory is restored;
+    /// only a failure sets `errorMessage`.
     func refresh() async {
         guard canRefresh else { return }
 
@@ -156,10 +171,12 @@ final class XcodeSweepStore {
 
     // MARK: - Querying
 
+    /// Items in `category` after the current status filter, search text, and sort order.
     func visibleItems(for category: StorageCategory) -> [StorageItem] {
         inventory.items(in: category, matching: statusFilter, search: searchText, sortedBy: sortOrder)
     }
 
+    /// The category shown in the detail column; `nil` on the overview.
     var activeCategory: StorageCategory? {
         if case let .category(category) = sidebarSelection {
             return category
@@ -167,11 +184,13 @@ final class XcodeSweepStore {
         return nil
     }
 
+    /// Selected items that belong to the active category.
     var selectedItems: [StorageItem] {
         guard let category = activeCategory else { return [] }
         return selectedItemIDs.compactMap { inventory.item(withID: $0) }.filter { $0.category == category }
     }
 
+    /// The deletion plan for the current selection.
     var selectionPlan: DeletionPlan {
         DeletionPlan(selection: selectedItems)
     }
@@ -182,8 +201,10 @@ final class XcodeSweepStore {
 
     // MARK: - Navigation
 
-    /// Moves to `destination`. A new destination starts with no selection, filter, or search;
-    /// re-selecting the current one keeps what the user set.
+    /// Moves to `destination`.
+    ///
+    /// A new destination starts with no selection, filter, or search; re-selecting the current one
+    /// keeps what the user set.
     func navigate(to destination: SidebarSelection) {
         guard destination != sidebarSelection else { return }
         sidebarSelection = destination
@@ -194,6 +215,7 @@ final class XcodeSweepStore {
 
     // MARK: - Selection Helpers
 
+    /// Opens `category` filtered to reclaimable items, with all of them selected.
     func openCategoryAndSelectReclaimable(_ category: StorageCategory) {
         navigate(to: .category(category))
         statusFilter = .reclaimable
@@ -201,12 +223,14 @@ final class XcodeSweepStore {
         selectedItemIDs = Set(candidates.map(\.id))
     }
 
+    /// Selects the visible reclaimable items in the active category.
     func selectReclaimableInActiveCategory() {
         guard let category = activeCategory else { return }
         let candidates = visibleItems(for: category).filter(\.isReclaimableCandidate)
         selectedItemIDs = Set(candidates.map(\.id))
     }
 
+    /// Selects every visible deletable item in the active category.
     func selectAllDeletableInActiveCategory() {
         guard let category = activeCategory else { return }
         let deletable = visibleItems(for: category).filter(\.isDeletable)
@@ -219,10 +243,14 @@ final class XcodeSweepStore {
 
     // MARK: - Deletion Flow
 
+    /// Asks the user to confirm deleting the selected items.
     func requestDeleteSelected() {
         requestDelete(items: selectedItems)
     }
 
+    /// Asks the user to confirm deleting `items` by setting `pendingDeletion`.
+    ///
+    /// Does nothing while busy or when none of `items` is deletable.
     func requestDelete(items: [StorageItem]) {
         guard canDelete else { return }
         let plan = DeletionPlan(selection: items)
@@ -230,6 +258,10 @@ final class XcodeSweepStore {
         pendingDeletion = plan
     }
 
+    /// Deletes the plan's items, removing each from the inventory as it goes.
+    ///
+    /// Sets `lastDeletionReport` on completion. If cancelled, items already deleted stay removed
+    /// and no report is set.
     func confirmDeletion(_ plan: DeletionPlan) async {
         guard canDelete, !plan.isEmpty else { return }
 

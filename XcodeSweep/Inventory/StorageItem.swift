@@ -30,12 +30,19 @@ enum DeletionMethod: Equatable, Hashable, Sendable {
 
 /// Status badge surfaced in the table and used for quick filters.
 enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
+    /// Not unused by age: used within `staleAfterDays`, last use unknown, or a category that never ages.
     case active
+    /// DerivedData whose recorded workspace path is missing or no longer exists.
     case orphaned
+    /// DerivedData whose workspace path looks like a git worktree: it contains "worktree" or sits under a `.git` file.
     case worktree
+    /// A simulator device that `simctl` reports as unavailable.
     case unavailable
+    /// A simulator device that was running at scan time.
     case booted
+    /// Last used more than the category's `staleAfterDays` ago, or always for the module cache; shown as "Unused".
     case stale
+    /// A simulator runtime that Xcode or macOS manages and `simctl` won't delete.
     case systemManaged
 
     var label: String {
@@ -64,6 +71,7 @@ enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
         return labels.dropLast().joined(separator: ", ") + ", or " + last
     }
 
+    /// Whether items with this status are recommended for cleanup.
     var isRecommendedForCleanup: Bool {
         switch self {
         case .orphaned, .unavailable, .stale:
@@ -76,13 +84,16 @@ enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
 
 /// A single inspectable and (optionally) deletable Xcode storage artifact.
 struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
+    /// A key stable across scans, such as `simDevice:<udid>` or `derivedData:<path>`.
     let id: String
     let category: StorageCategory
     let name: String
+    /// Secondary line under the name, such as the runtime and state or the workspace location.
     let subtitle: String
     let sizeBytes: Int64
     let lastUsedDate: Date?
     let path: URL?
+    /// The project or workspace a DerivedData folder was built from.
     let workspacePath: String?
     let status: ItemStatus
     let deletionMethod: DeletionMethod
@@ -92,15 +103,17 @@ struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
         deletionMethod.isDeletable
     }
 
+    /// Whether the item is deletable and its status is recommended for cleanup.
     var isReclaimableCandidate: Bool {
         isDeletable && status.isRecommendedForCleanup
     }
 
-    /// Sortable timestamp fallback so nil dates sort consistently.
+    /// `lastUsedDate` as seconds since 1970; items never used sort as 0.
     var sortableTimestamp: TimeInterval {
         lastUsedDate?.timeIntervalSince1970 ?? 0
     }
 
+    /// Sort position for the status column, most reclaimable first.
     var statusSortRank: Int {
         switch status {
         case .orphaned: 0
@@ -114,6 +127,7 @@ struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
     }
 }
 
+/// One labeled detail row in the inspector.
 struct MetadataEntry: Identifiable, Equatable, Hashable, Sendable {
     var id: String {
         key

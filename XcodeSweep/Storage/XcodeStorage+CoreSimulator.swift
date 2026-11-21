@@ -21,6 +21,7 @@ extension XcodeStorage {
 
     // MARK: - Deletion
 
+    /// Permanently deletes a simulator device, first trying to shut it down when `isBooted`.
     func deleteSimulatorDevice(udid: String, isBooted: Bool) async throws {
         if isBooted {
             do {
@@ -50,6 +51,7 @@ extension XcodeStorage {
 
     // MARK: - Shared Formatting
 
+    /// A display name for a runtime identifier: `com.apple.CoreSimulator.SimRuntime.iOS-18-2` becomes `iOS 18.2`.
     static func readableRuntimeName(from runtimeIdentifier: String) -> String {
         let prefix = "com.apple.CoreSimulator.SimRuntime."
         let stripped = runtimeIdentifier.hasPrefix(prefix)
