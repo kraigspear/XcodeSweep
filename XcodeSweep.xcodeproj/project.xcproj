@@ -66,10 +66,13 @@
       "children": [
         { "path": "DeletionPlanTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DirectorySizerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "ParkedCallsTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "ProcessRunnerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "TestSupport.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "StorageInventoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
-        { "path": "XcodeStorageTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "XcodeStorageCancellationTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "XcodeStorageDeletionTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "XcodeStorageScanTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeSweepStoreTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
       ],
     }, {
