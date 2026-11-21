@@ -175,7 +175,7 @@ struct ProcessRunnerTests {
         let task = Task {
             try await ProcessRunner().run(
                 executableURL: URL(fileURLWithPath: "/bin/sh"),
-                arguments: ["-c", probe.directChildScript(waitsForDescendant: true)]
+                arguments: probe.directChildArguments(waitsForDescendant: true)
             )
         }
         defer { task.cancel() }
@@ -201,7 +201,7 @@ struct ProcessRunnerTests {
         let task = Task {
             try await ProcessRunner().run(
                 executableURL: URL(fileURLWithPath: "/bin/sh"),
-                arguments: ["-c", probe.directChildScript(waitsForDescendant: false)]
+                arguments: probe.directChildArguments(waitsForDescendant: false)
             )
         }
         defer { task.cancel() }
@@ -275,8 +275,11 @@ private struct PIDMarker {
         #"/bin/sh -c "trap '' TERM; echo \$\$ > \"\$0.tmp\" && mv \"\$0.tmp\" \"\$0\"; exec "# + command + #"" "$0" & wait"#
     }
 
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("xcodesweep-pid-\(UUID().uuidString)")
+    let url: URL
+
+    init(directory: URL = FileManager.default.temporaryDirectory) {
+        url = directory.appendingPathComponent("xcodesweep-pid-\(UUID().uuidString)")
+    }
 
     var path: String {
         url.path
@@ -305,11 +308,12 @@ private struct SilentDescendantProbe {
     private let directChildPIDMarker: PIDMarker
 
     init() throws {
+        // The apostrophe keeps the scripts honest about quoting the paths they are handed.
         directoryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("xcodesweep-probe-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("xcodesweep-probe-it's-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        descendantPIDMarker = PIDMarker()
-        directChildPIDMarker = PIDMarker()
+        descendantPIDMarker = PIDMarker(directory: directoryURL)
+        directChildPIDMarker = PIDMarker(directory: directoryURL)
         try """
         trap '' TERM
         echo $$ > "$1.tmp" && mv "$1.tmp" "$1"
@@ -327,11 +331,18 @@ private struct SilentDescendantProbe {
         directoryURL.appendingPathComponent("write")
     }
 
-    func directChildScript(waitsForDescendant: Bool) -> String {
-        let quoted = { (path: String) in "'\(path)'" }
-        return "echo $$ > \(quoted(directChildPIDMarker.path + ".tmp")) && mv \(quoted(directChildPIDMarker.path + ".tmp")) \(quoted(directChildPIDMarker.path)); "
-            + "/bin/sh \(quoted(descendantScriptURL.path)) \(quoted(descendantPIDMarker.path)) \(quoted(writeSignalURL.path)) &"
+    /// Arguments for `/bin/sh` that run the direct child. Paths travel as positional parameters,
+    /// never inside the script text, so no path character needs quoting.
+    func directChildArguments(waitsForDescendant: Bool) -> [String] {
+        let script = #"echo $$ > "$0.tmp" && mv "$0.tmp" "$0"; /bin/sh "$1" "$2" "$3" &"#
             + (waitsForDescendant ? " wait" : "")
+        return [
+            "-c", script,
+            directChildPIDMarker.path,
+            descendantScriptURL.path,
+            descendantPIDMarker.path,
+            writeSignalURL.path,
+        ]
     }
 
     func waitForLaunch() async throws {
