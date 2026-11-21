@@ -47,15 +47,45 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
         }
     }
 
-    /// Status filters worth offering; statuses a category never produces are left out.
-    var availableFilters: [ItemFilter] {
+    // MARK: - Status Rules
+
+    /// Days without use after which an item counts as unused; `nil` when age never makes an item unused.
+    var staleAfterDays: Int? {
+        switch self {
+        case .derivedData, .simulatorDevices:
+            30
+        case .simulatorRuntimes, .deviceSupport, .previews:
+            45
+        case .archivesAndCaches:
+            nil
+        }
+    }
+
+    /// Every status a scan of this category can assign. Filters are offered only for these.
+    var possibleStatuses: Set<ItemStatus> {
         switch self {
         case .derivedData:
-            [.all, .reclaimable, .orphaned, .worktree, .stale]
+            [.orphaned, .worktree, .stale, .active]
         case .simulatorDevices:
-            [.all, .reclaimable, .unavailable, .stale]
-        case .simulatorRuntimes, .deviceSupport, .previews, .archivesAndCaches:
-            [.all, .reclaimable, .stale]
+            [.unavailable, .booted, .stale, .active]
+        case .simulatorRuntimes:
+            [.systemManaged, .stale, .active]
+        case .deviceSupport, .previews, .archivesAndCaches:
+            [.stale, .active]
+        }
+    }
+
+    /// `.stale` once `lastUsed` is more than `staleAfterDays` before `now`; otherwise `.active`.
+    func ageStatus(lastUsed: Date?, now: Date) -> ItemStatus {
+        guard let staleAfterDays, let lastUsed else { return .active }
+        return now.timeIntervalSince(lastUsed) > TimeInterval(staleAfterDays) * 86400 ? .stale : .active
+    }
+
+    /// Status filters worth offering; statuses a category never produces are left out.
+    var availableFilters: [ItemFilter] {
+        ItemFilter.allCases.filter { filter in
+            guard let status = filter.status else { return true }
+            return possibleStatuses.contains(status)
         }
     }
 

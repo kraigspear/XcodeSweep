@@ -31,11 +31,7 @@ extension XcodeStorage {
         return await Self.scanConcurrently(candidates) { candidate in
             let size = DirectorySizer.allocatedSize(of: candidate.url)
             let modified = Self.modificationDate(of: candidate.url)
-            let status = Self.classifyByAge(
-                lastUsed: modified,
-                now: now,
-                thresholdDays: StalenessPolicy.deviceSupportDays
-            )
+            let status = StorageCategory.deviceSupport.ageStatus(lastUsed: modified, now: now)
 
             return StorageItem(
                 id: "deviceSupport:\(candidate.url.path)",
@@ -83,11 +79,7 @@ extension XcodeStorage {
             let name = (plist?["name"] as? String) ?? url.lastPathComponent
             let runtimeLabel = (plist?["runtime"] as? String).map(Self.readableRuntimeName(from:))
             let subtitle = runtimeLabel.map { "\($0) • \(url.lastPathComponent)" } ?? url.lastPathComponent
-            let status = Self.classifyByAge(
-                lastUsed: modified,
-                now: now,
-                thresholdDays: StalenessPolicy.previewsDays
-            )
+            let status = StorageCategory.previews.ageStatus(lastUsed: modified, now: now)
 
             var metadata: [MetadataEntry] = [
                 MetadataEntry(key: "UDID", value: url.lastPathComponent),

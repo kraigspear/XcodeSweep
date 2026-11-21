@@ -8,11 +8,7 @@ extension XcodeStorage {
             executableURL: Self.xcrunURL,
             arguments: ["simctl", "runtime", "list", "-j"]
         )
-        return try Self.decodeRuntimes(
-            from: output.stdout,
-            now: now,
-            thresholdDays: StalenessPolicy.simulatorRuntimesDays
-        )
+        return try Self.decodeRuntimes(from: output.stdout, now: now)
     }
 
     func scanSimulatorDevices(now: Date) async throws -> [StorageItem] {
@@ -20,11 +16,7 @@ extension XcodeStorage {
             executableURL: Self.xcrunURL,
             arguments: ["simctl", "list", "devices", "-j"]
         )
-        return try Self.decodeDevices(
-            from: output.stdout,
-            now: now,
-            thresholdDays: StalenessPolicy.simulatorDevicesDays
-        )
+        return try Self.decodeDevices(from: output.stdout, now: now)
     }
 
     // MARK: - Deletion
@@ -77,13 +69,8 @@ extension XcodeStorage {
 
     // MARK: - Private JSON Decoding
 
-    private static func decodeRuntimes(
-        from data: Data,
-        now: Date,
-        thresholdDays: Int
-    ) throws -> [StorageItem] {
+    private static func decodeRuntimes(from data: Data, now: Date) throws -> [StorageItem] {
         let rawMap = try JSONDecoder().decode([String: SimRuntimeRecord].self, from: data)
-        let staleThreshold = StalenessPolicy.threshold(days: thresholdDays)
 
         return rawMap.values.map { record in
             let platformName = readablePlatform(
@@ -93,14 +80,9 @@ extension XcodeStorage {
             let lastUsedDate = record.lastUsedAt.flatMap(parseISO8601)
             let isDeletable = record.deletable ?? true
 
-            let status: ItemStatus
-            if !isDeletable {
-                status = .systemManaged
-            } else if let lastUsedDate, now.timeIntervalSince(lastUsedDate) > staleThreshold {
-                status = .stale
-            } else {
-                status = .active
-            }
+            let status: ItemStatus = isDeletable
+                ? StorageCategory.simulatorRuntimes.ageStatus(lastUsed: lastUsedDate, now: now)
+                : .systemManaged
 
             let method: DeletionMethod = isDeletable
                 ? .simctlRuntime(identifier: record.identifier)
@@ -137,13 +119,8 @@ extension XcodeStorage {
         .sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
-    private static func decodeDevices(
-        from data: Data,
-        now: Date,
-        thresholdDays: Int
-    ) throws -> [StorageItem] {
+    private static func decodeDevices(from data: Data, now: Date) throws -> [StorageItem] {
         let payload = try JSONDecoder().decode(SimDeviceListPayload.self, from: data)
-        let staleThreshold = StalenessPolicy.threshold(days: thresholdDays)
         var items: [StorageItem] = []
 
         for (runtimeKey, devices) in payload.devices {
@@ -161,10 +138,8 @@ extension XcodeStorage {
                     status = .unavailable
                 } else if isBooted {
                     status = .booted
-                } else if let lastUsedDate, now.timeIntervalSince(lastUsedDate) > staleThreshold {
-                    status = .stale
                 } else {
-                    status = .active
+                    status = StorageCategory.simulatorDevices.ageStatus(lastUsed: lastUsedDate, now: now)
                 }
 
                 let deviceURL = device.dataPath.map {
