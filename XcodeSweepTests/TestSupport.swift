@@ -1,4 +1,6 @@
 import Foundation
+import os
+import Testing
 @testable import XcodeSweep
 
 // MARK: - Temporary Xcode Filesystem Fixture
@@ -411,6 +413,34 @@ func waitUntil(
         }
         try await Task.sleep(for: .milliseconds(5))
     }
+}
+
+/// Cancels `task` and returns its result, failing when the task does not finish within `timeout`
+/// of the call. The deadline is fixed before cancellation starts and checked against the task's
+/// recorded finish time, so neither a blocking cancellation handler nor a late poll can hide a
+/// slow finish.
+func cancelAndAwaitResult<Success: Sendable>(
+    of task: Task<Success, any Error>,
+    within timeout: Duration
+) async throws -> Result<Success, any Error> {
+    let deadline = ContinuousClock.now + timeout
+    let outcome = OSAllocatedUnfairLock<(result: Result<Success, any Error>, finishedAt: ContinuousClock.Instant)?>(
+        initialState: nil
+    )
+    Task.detached {
+        task.cancel()
+        let result = await task.result
+        let finishedAt = ContinuousClock.now
+        outcome.withLock { $0 = (result, finishedAt) }
+    }
+    try await waitUntil("cancelled task finished", timeout: deadline - ContinuousClock.now) {
+        outcome.withLock { $0 != nil }
+    }
+    let finished = try #require(outcome.withLock { $0 })
+    guard finished.finishedAt <= deadline else {
+        throw ConditionTimeoutError(description: "Cancelled task finished after its deadline")
+    }
+    return finished.result
 }
 
 func testISO8601Date(_ string: String) -> Date {

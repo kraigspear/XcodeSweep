@@ -47,13 +47,13 @@ struct XcodeStorage: Sendable {
     // MARK: - Scanning
 
     func scanAll(
-        onProgress: @escaping @Sendable (StorageCategory, [StorageItem]) -> Void
+        onProgress: @escaping @Sendable (StorageCategory, [StorageItem]) async -> Void
     ) async throws -> ScanSnapshot {
         let capacity = readVolumeCapacity()
         let referenceDate = now()
 
-        return await withTaskGroup(
-            of: (StorageCategory, [StorageItem], String?).self,
+        let snapshot = await withTaskGroup(
+            of: (StorageCategory, [StorageItem], String?)?.self,
             returning: ScanSnapshot.self
         ) { group in
             group.addTask {
@@ -65,6 +65,8 @@ struct XcodeStorage: Sendable {
                 do {
                     let items = try await scanSimulatorDevices(now: referenceDate)
                     return (.simulatorDevices, items, nil)
+                } catch is CancellationError {
+                    return nil
                 } catch {
                     return (.simulatorDevices, [], "Simulator Devices: \(error.localizedDescription)")
                 }
@@ -74,6 +76,8 @@ struct XcodeStorage: Sendable {
                 do {
                     let items = try await scanSimulatorRuntimes(now: referenceDate)
                     return (.simulatorRuntimes, items, nil)
+                } catch is CancellationError {
+                    return nil
                 } catch {
                     return (.simulatorRuntimes, [], "Simulator Runtimes: \(error.localizedDescription)")
                 }
@@ -97,12 +101,13 @@ struct XcodeStorage: Sendable {
             var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
             var warnings: [String] = []
 
-            for await (category, items, warning) in group {
+            for await case let (category, items, warning)? in group {
                 itemsByCategory[category] = items
                 if let warning {
                     warnings.append(warning)
                 }
-                onProgress(category, items)
+                // Awaited, so no progress update can outlive the scan.
+                await onProgress(category, items)
             }
 
             return ScanSnapshot(
@@ -112,6 +117,10 @@ struct XcodeStorage: Sendable {
                 warnings: warnings
             )
         }
+
+        // A cancelled scan is incomplete; never hand it back as a finished result.
+        try Task.checkCancellation()
+        return snapshot
     }
 
     // MARK: - Deletion
