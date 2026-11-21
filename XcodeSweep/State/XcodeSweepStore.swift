@@ -153,17 +153,12 @@ final class XcodeSweepStore {
     private var diskAvailableBytes: Int64?
     private var diskTotalBytes: Int64?
 
-    private let scanner: any StorageScanning
-    private let deleter: any StorageDeleting
+    private let xcodeStorage: XcodeStorage
 
     // MARK: - Initialization
 
-    init(
-        scanner: any StorageScanning = LiveStorageService(),
-        deleter: any StorageDeleting = LiveStorageService()
-    ) {
-        self.scanner = scanner
-        self.deleter = deleter
+    init(xcodeStorage: XcodeStorage = XcodeStorage()) {
+        self.xcodeStorage = xcodeStorage
     }
 
     // MARK: - Scanning
@@ -178,7 +173,7 @@ final class XcodeSweepStore {
         defer { isScanning = false }
 
         do {
-            let snapshot = try await scanner.scanAll { [weak self] category, items in
+            let snapshot = try await xcodeStorage.scanAll { [weak self] category, items in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.itemsByCategory[category] = items
@@ -296,7 +291,7 @@ final class XcodeSweepStore {
             removedItemID: nil
         )
 
-        let report = await deleter.delete(items: pending.items) { [weak self] progress in
+        let report = await xcodeStorage.delete(items: pending.items) { [weak self] progress in
             await MainActor.run {
                 guard let self, self.activeDeletionID == deletionID else { return }
                 self.deletionProgress = progress

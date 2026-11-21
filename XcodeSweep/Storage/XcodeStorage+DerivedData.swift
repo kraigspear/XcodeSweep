@@ -1,21 +1,10 @@
 import Foundation
 
-/// Scans `~/Library/Developer/Xcode/DerivedData` and inspects each folder's `info.plist`
-/// to identify orphaned projects and git worktree builds.
-struct DerivedDataScanner: Sendable {
-    private let derivedDataURL: URL
-    private let staleThresholdDays: Int
+extension XcodeStorage {
+    static let moduleCacheFolderName = "ModuleCache.noindex"
 
-    init(
-        derivedDataURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Developer/Xcode/DerivedData", isDirectory: true),
-        staleThresholdDays: Int = 30
-    ) {
-        self.derivedDataURL = derivedDataURL
-        self.staleThresholdDays = staleThresholdDays
-    }
-
-    func scan() async -> [StorageItem] {
+    func scanDerivedData(now: Date) async -> [StorageItem] {
+        let derivedDataURL = xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true)
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
             at: derivedDataURL,
@@ -26,52 +15,32 @@ struct DerivedDataScanner: Sendable {
         }
 
         let candidates = entries.filter { url in
-            guard url.lastPathComponent != "ModuleCache.noindex" else { return false }
+            guard url.lastPathComponent != Self.moduleCacheFolderName else { return false }
             return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
-        let now = Date()
-        let threshold = TimeInterval(staleThresholdDays) * 86400
-
-        return await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
-            for folderURL in candidates {
-                group.addTask {
-                    Self.inspectDerivedDataFolder(
-                        at: folderURL,
-                        now: now,
-                        staleThreshold: threshold
-                    )
-                }
-            }
-
-            var items: [StorageItem] = []
-            for await item in group {
-                if let item {
-                    items.append(item)
-                }
-            }
-            return items.sorted { $0.sizeBytes > $1.sizeBytes }
+        let threshold = StalenessPolicy.threshold(days: StalenessPolicy.derivedDataDays)
+        return await Self.scanConcurrently(candidates) { folderURL in
+            Self.inspectDerivedDataFolder(at: folderURL, now: now, staleThreshold: threshold)
         }
     }
 
-    // MARK: - Folder Inspection
+    // MARK: - Private Inspection
 
-    static func inspectDerivedDataFolder(
+    private static func inspectDerivedDataFolder(
         at folderURL: URL,
-        now: Date = Date(),
-        staleThreshold: TimeInterval = 30 * 86400
+        now: Date,
+        staleThreshold: TimeInterval
     ) -> StorageItem {
         let fileManager = FileManager.default
         let folderName = folderURL.lastPathComponent
-        let infoPlistURL = folderURL.appendingPathComponent("info.plist")
-        let parsedInfo = parseInfoPlist(at: infoPlistURL)
+        let plist = loadPlist(at: folderURL.appendingPathComponent("info.plist"))
 
-        let workspacePath = parsedInfo?.workspacePath
-        let lastAccessed = parsedInfo?.lastAccessedDate
-            ?? (try? folderURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
-
+        let workspacePath = plist?["WorkspacePath"] as? String
+        let lastAccessed = (plist?["LastAccessedDate"] as? Date) ?? modificationDate(of: folderURL)
         let sizeBytes = DirectorySizer.allocatedSize(of: folderURL)
-        let status = classifyStatus(
+
+        let status = classifyDerivedDataStatus(
             workspacePath: workspacePath,
             lastAccessed: lastAccessed,
             now: now,
@@ -109,24 +78,12 @@ struct DerivedDataScanner: Sendable {
         )
     }
 
-    static func parseInfoPlist(at url: URL) -> DerivedDataInfo? {
-        guard let data = try? Data(contentsOf: url),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-        else {
-            return nil
-        }
-
-        let workspacePath = plist["WorkspacePath"] as? String
-        let lastAccessedDate = plist["LastAccessedDate"] as? Date
-        return DerivedDataInfo(workspacePath: workspacePath, lastAccessedDate: lastAccessedDate)
-    }
-
-    static func classifyStatus(
+    private static func classifyDerivedDataStatus(
         workspacePath: String?,
         lastAccessed: Date?,
         now: Date,
         staleThreshold: TimeInterval,
-        fileManager: FileManager = .default
+        fileManager: FileManager
     ) -> ItemStatus {
         guard let workspacePath, !workspacePath.isEmpty, fileManager.fileExists(atPath: workspacePath) else {
             return .orphaned
@@ -144,9 +101,8 @@ struct DerivedDataScanner: Sendable {
     }
 
     /// Detects git worktrees either by path convention or by finding a `.git` file (worktree pointer) walking upward.
-    static func isWorktreePath(_ workspacePath: String, fileManager: FileManager = .default) -> Bool {
-        let lowercased = workspacePath.lowercased()
-        if lowercased.contains("worktree") {
+    private static func isWorktreePath(_ workspacePath: String, fileManager: FileManager) -> Bool {
+        if workspacePath.lowercased().contains("worktree") {
             return true
         }
 
@@ -202,9 +158,4 @@ struct DerivedDataScanner: Sendable {
         }
         return shortened
     }
-}
-
-struct DerivedDataInfo: Equatable, Sendable {
-    let workspacePath: String?
-    let lastAccessedDate: Date?
 }
