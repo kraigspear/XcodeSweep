@@ -407,14 +407,14 @@ struct XcodeStorageTests {
             ),
         ])
 
-        await controller.resumeCall(
+        await controller.resume(
             id: firstCall.id,
             with: .success(CommandOutput(stdout: Data(), stderr: Data(), terminationStatus: 0))
         )
 
         let secondCall = try await controller.nextPendingCall()
         #expect(secondCall.arguments == ["simctl", "delete", "UDID-1"])
-        await controller.resumeCall(
+        await controller.resume(
             id: secondCall.id,
             with: .success(CommandOutput(stdout: Data(), stderr: Data(), terminationStatus: 0))
         )
@@ -446,7 +446,7 @@ struct XcodeStorageTests {
             ),
         ])
 
-        await controller.resumeCall(
+        await controller.resume(
             id: thirdCall.id,
             with: .failure(ProcessRunnerError.nonZeroExit(command: "xcrun", status: 1, stderr: "runtime busy"))
         )
@@ -739,7 +739,7 @@ struct XcodeStorageTests {
             fileTrasher: RecordingFileTrasher()
         )
 
-        var parkedCalls: [PendingCommandHandle] = []
+        var parkedCalls: [ParkedCall<[String]>] = []
         for try await event in storage.scan() {
             if case .categoryScanned = event {
                 // Wait until both simctl calls are parked before breaking out of the loop.
@@ -761,42 +761,20 @@ struct XcodeStorageTests {
         }
     }
 
-    // MARK: - Test Adapter Waiters
+    // MARK: - Test Adapter Waiter
 
-    @Test(
-        "Cancelling a registered command waiter exits immediately instead of hanging",
-        .timeLimit(.minutes(1))
-    )
-    func cancelledCommandWaiterExitsImmediately() async throws {
-        let controller = ControllableCommandRunner()
+    /// Verifies the shared parked-call fake cannot hang a test whose waiter is cancelled.
+    /// To replicate: not app behavior; guards the test fake behind both the command and trash seams.
+    @Test("Cancelling a registered parked-call waiter exits immediately", .timeLimit(.minutes(1)))
+    func cancelledParkedCallWaiterExitsImmediately() async throws {
+        let calls = ParkedCalls<Int, Void>()
         let waiterTask = Task {
-            try await controller.nextPendingCall()
+            try await calls.nextPendingCall()
         }
         defer { waiterTask.cancel() }
 
-        try await waitUntil("command waiter registered") {
-            await controller.hasRegisteredWaiter
-        }
-        waiterTask.cancel()
-
-        await #expect(throws: CancellationError.self) {
-            _ = try await waiterTask.value
-        }
-    }
-
-    @Test(
-        "Cancelling a registered trash waiter exits immediately instead of hanging",
-        .timeLimit(.minutes(1))
-    )
-    func cancelledTrashWaiterExitsImmediately() async throws {
-        let trasher = ControllableFileTrasher()
-        let waiterTask = Task {
-            try await trasher.nextPendingTrash()
-        }
-        defer { waiterTask.cancel() }
-
-        try await waitUntil("trash waiter registered") {
-            await trasher.hasRegisteredWaiter
+        try await waitUntil("waiter registered") {
+            await calls.hasRegisteredWaiter
         }
         waiterTask.cancel()
 

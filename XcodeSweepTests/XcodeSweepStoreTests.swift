@@ -190,7 +190,7 @@ struct XcodeSweepStoreTests {
 
         async let batch1Done: Void = store.confirmDeletion(batch1)
 
-        let call1 = try await trasher.nextPendingTrash()
+        let call1 = try await trasher.nextPendingCall()
         #expect(call1.url == firstURL)
         #expect(store.isDeleting)
         #expect(!store.canRefresh)
@@ -198,8 +198,8 @@ struct XcodeSweepStoreTests {
         #expect(store.deletionProgress?.completedCount == 0)
         #expect(store.deletionProgress?.totalCount == 2)
 
-        await trasher.resumeTrash(id: call1.id)
-        let call2 = try await trasher.nextPendingTrash()
+        await trasher.resume(id: call1.id)
+        let call2 = try await trasher.nextPendingCall()
         #expect(call2.url == secondURL)
 
         // Item 1 must already be removed live and inventory totals decremented before batch 1 completes.
@@ -209,7 +209,7 @@ struct XcodeSweepStoreTests {
         #expect(store.deletionProgress?.completedCount == 1)
         #expect(store.deletionProgress?.removedBytes == first.sizeBytes)
 
-        await trasher.resumeTrash(id: call2.id)
+        await trasher.resume(id: call2.id)
         await batch1Done
 
         #expect(store.operation == .idle)
@@ -226,11 +226,11 @@ struct XcodeSweepStoreTests {
 
         async let batch2Done: Void = store.confirmDeletion(batch2)
 
-        let call3 = try await trasher.nextPendingTrash()
+        let call3 = try await trasher.nextPendingCall()
         #expect(call3.url == thirdURL)
         #expect(store.isDeleting)
         #expect(store.deletionProgress?.totalCount == 1)
-        await trasher.resumeTrash(id: call3.id)
+        await trasher.resume(id: call3.id)
 
         await batch2Done
         #expect(store.operation == .idle)
@@ -288,11 +288,11 @@ struct XcodeSweepStoreTests {
         defer { batchTask.cancel() }
 
         // Complete item 1, then cancel while item 2 is parked.
-        let call1 = try await trasher.nextPendingTrash()
+        let call1 = try await trasher.nextPendingCall()
         #expect(call1.url == firstURL)
-        await trasher.resumeTrash(id: call1.id)
+        await trasher.resume(id: call1.id)
 
-        let call2 = try await trasher.nextPendingTrash()
+        let call2 = try await trasher.nextPendingCall()
         #expect(call2.url == secondURL)
         batchTask.cancel()
         await batchTask.value
@@ -365,11 +365,11 @@ struct XcodeSweepStoreTests {
         for _ in 0 ..< 2 {
             let call = try await controller.nextPendingCall()
             if call.arguments.contains("devices") {
-                await controller.resumeCall(id: call.id, with: .success(
+                await controller.resume(id: call.id, with: .success(
                     CommandOutput(stdout: Data(#"{"devices":{}}"#.utf8), stderr: Data(), terminationStatus: 0)
                 ))
             } else {
-                await controller.resumeCall(id: call.id, with: .failure(TestTrashError(message: "runtime list failed")))
+                await controller.resume(id: call.id, with: .failure(TestTrashError(message: "runtime list failed")))
             }
         }
         await firstScan.value
@@ -450,14 +450,14 @@ struct XcodeSweepStoreTests {
         store.pendingDeletion = nil
 
         let deleteTask = Task { await store.confirmDeletion(pending) }
-        let trashCall = try await trasher.nextPendingTrash()
+        let trashCall = try await trasher.nextPendingCall()
 
         #expect(store.isDeleting)
         #expect(!store.canRefresh)
         await store.refresh() // must no-op immediately while deleting
         #expect(await !controller.hasParkedCall)
 
-        await trasher.resumeTrash(id: trashCall.id)
+        await trasher.resume(id: trashCall.id)
         await deleteTask.value
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .derivedData).isEmpty)
@@ -544,7 +544,7 @@ struct XcodeSweepStoreTests {
         for _ in 0 ..< 2 {
             let call = try await controller.nextPendingCall()
             let json = call.arguments.contains("devices") ? #"{"devices":{}}"# : "{}"
-            await controller.resumeCall(id: call.id, with: .success(
+            await controller.resume(id: call.id, with: .success(
                 CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
             ))
         }
