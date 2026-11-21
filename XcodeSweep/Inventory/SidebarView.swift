@@ -8,7 +8,7 @@ struct SidebarView: View {
             Section {
                 SidebarOverviewRow(
                     totalBytes: store.inventory.totalBytes,
-                    isScanning: store.isScanning
+                    isScanning: store.operation.isScanning
                 )
                 .tag(SidebarSelection.overview)
             }
@@ -17,7 +17,7 @@ struct SidebarView: View {
                 ForEach(store.inventory.categoryMetrics) { metrics in
                     SidebarCategoryRow(
                         metrics: metrics,
-                        isScanning: store.isCategoryScanning(metrics.category)
+                        isScanning: store.operation.isScanning(metrics.category)
                     )
                     .tag(SidebarSelection.category(metrics.category))
                 }

@@ -13,7 +13,7 @@ struct OverviewView: View {
                     reclaimableBytes: store.inventory.reclaimableBytes,
                     reclaimableItems: store.inventory.reclaimableItemCount,
                     diskAvailableBytes: store.inventory.diskAvailableBytes,
-                    isScanning: store.isScanning
+                    isScanning: store.operation.isScanning
                 )
 
                 if !store.scanWarnings.isEmpty {
@@ -24,7 +24,7 @@ struct OverviewView: View {
 
                 CategoryGridSection(
                     metrics: store.inventory.categoryMetrics,
-                    isCategoryScanning: { store.isCategoryScanning($0) },
+                    isCategoryScanning: { store.operation.isScanning($0) },
                     onOpenCategory: { category in
                         store.navigate(to: .category(category))
                     },

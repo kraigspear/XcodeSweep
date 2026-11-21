@@ -7,6 +7,7 @@ enum OperationState: Equatable, Sendable {
     case scanning(completed: Set<StorageCategory>)
     case deleting(DeletionProgress?)
 
+    /// Whether a scan or deletion is running.
     var isBusy: Bool {
         self != .idle
     }
@@ -62,6 +63,7 @@ final class XcodeSweepStore {
     ]
     var inspectorPresented = true
 
+    /// The scan or deletion in progress; a new one starts only while this is `.idle`.
     private(set) var operation: OperationState = .idle
     private(set) var inventory: StorageInventory = .empty
     private(set) var scanWarnings: [String] = []
@@ -75,30 +77,8 @@ final class XcodeSweepStore {
 
     // MARK: - Derived Lifecycle Queries
 
-    var isScanning: Bool {
-        operation.isScanning
-    }
-
-    var isDeleting: Bool {
-        operation.isDeleting
-    }
-
-    /// Whether a scan can start; `false` while a scan or deletion is running.
-    var canRefresh: Bool {
-        operation == .idle
-    }
-
-    /// Whether a deletion can start; `false` while a scan or deletion is running.
-    var canDelete: Bool {
-        operation == .idle
-    }
-
     var hasCompletedScan: Bool {
         inventory.scannedAt != nil
-    }
-
-    var deletionProgress: DeletionProgress? {
-        operation.deletionProgress
     }
 
     /// Categories whose results are in: those finished so far during a scan, otherwise every
@@ -131,7 +111,7 @@ final class XcodeSweepStore {
     /// Does nothing while busy. If the scan fails or is cancelled, the previous inventory is restored;
     /// only a failure sets `errorMessage`.
     func refresh() async {
-        guard canRefresh else { return }
+        guard !operation.isBusy else { return }
 
         let previousInventory = inventory
         let previousWarnings = scanWarnings
@@ -195,10 +175,6 @@ final class XcodeSweepStore {
         DeletionPlan(selection: selectedItems)
     }
 
-    func isCategoryScanning(_ category: StorageCategory) -> Bool {
-        operation.isScanning(category)
-    }
-
     // MARK: - Navigation
 
     /// Moves to `destination`.
@@ -252,7 +228,7 @@ final class XcodeSweepStore {
     ///
     /// Does nothing while busy or when none of `items` is deletable.
     func requestDelete(items: [StorageItem]) {
-        guard canDelete else { return }
+        guard !operation.isBusy else { return }
         let plan = DeletionPlan(selection: items)
         guard !plan.isEmpty else { return }
         pendingDeletion = plan
@@ -263,7 +239,7 @@ final class XcodeSweepStore {
     /// Sets `lastDeletionReport` on completion. If cancelled, items already deleted stay removed
     /// and no report is set.
     func confirmDeletion(_ plan: DeletionPlan) async {
-        guard canDelete, !plan.isEmpty else { return }
+        guard !operation.isBusy, !plan.isEmpty else { return }
 
         pendingDeletion = nil
         operation = .deleting(nil)

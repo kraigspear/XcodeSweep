@@ -91,7 +91,7 @@ struct XcodeSweepStoreTests {
         #expect(store.lastDeletionReport?.deletedCount == 1)
         #expect(store.lastDeletionReport?.reclaimedBytes == orphanedItem.sizeBytes)
         #expect(store.operation == .idle)
-        #expect(store.deletionProgress == nil)
+        #expect(store.operation.deletionProgress == nil)
     }
 
     @Test("Removes only succeeded item IDs when duplicate project names share a failure")
@@ -192,29 +192,28 @@ struct XcodeSweepStoreTests {
 
         let call1 = try await trasher.nextPendingCall()
         #expect(call1.url == firstURL)
-        #expect(store.isDeleting)
-        #expect(!store.canRefresh)
-        #expect(!store.canDelete)
-        #expect(store.deletionProgress?.completedCount == 0)
-        #expect(store.deletionProgress?.totalCount == 2)
+        #expect(store.operation.isDeleting)
+        #expect(store.operation.isBusy)
+        #expect(store.operation.deletionProgress?.completedCount == 0)
+        #expect(store.operation.deletionProgress?.totalCount == 2)
 
         await trasher.resume(id: call1.id)
         let call2 = try await trasher.nextPendingCall()
         #expect(call2.url == secondURL)
 
         // Item 1 must already be removed live and inventory totals decremented before batch 1 completes.
-        #expect(store.isDeleting)
+        #expect(store.operation.isDeleting)
         #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
         #expect(store.inventory.totalBytes == second.sizeBytes + third.sizeBytes)
-        #expect(store.deletionProgress?.completedCount == 1)
-        #expect(store.deletionProgress?.removedBytes == first.sizeBytes)
+        #expect(store.operation.deletionProgress?.completedCount == 1)
+        #expect(store.operation.deletionProgress?.removedBytes == first.sizeBytes)
 
         await trasher.resume(id: call2.id)
         await batch1Done
 
         #expect(store.operation == .idle)
-        #expect(!store.isDeleting)
-        #expect(store.deletionProgress == nil)
+        #expect(!store.operation.isDeleting)
+        #expect(store.operation.deletionProgress == nil)
         #expect(store.inventory.items(in: .derivedData).map(\.id) == [third.id])
         #expect(store.inventory.totalBytes == third.sizeBytes)
         #expect(store.lastDeletionReport?.deletedCount == 2)
@@ -228,8 +227,8 @@ struct XcodeSweepStoreTests {
 
         let call3 = try await trasher.nextPendingCall()
         #expect(call3.url == thirdURL)
-        #expect(store.isDeleting)
-        #expect(store.deletionProgress?.totalCount == 1)
+        #expect(store.operation.isDeleting)
+        #expect(store.operation.deletionProgress?.totalCount == 1)
         await trasher.resume(id: call3.id)
 
         await batch2Done
@@ -298,8 +297,8 @@ struct XcodeSweepStoreTests {
         await batchTask.value
 
         #expect(store.operation == .idle)
-        #expect(!store.isDeleting)
-        #expect(store.deletionProgress == nil)
+        #expect(!store.operation.isDeleting)
+        #expect(store.operation.deletionProgress == nil)
         #expect(store.lastDeletionReport == nil)
         #expect(store.errorMessage == nil)
         #expect(await trasher.trashedURLs == [firstURL])
@@ -433,8 +432,8 @@ struct XcodeSweepStoreTests {
         _ = try await controller.nextPendingCall()
         _ = try await controller.nextPendingCall()
 
-        #expect(store.isScanning)
-        #expect(!store.canDelete)
+        #expect(store.operation.isScanning)
+        #expect(store.operation.isBusy)
         store.requestDelete(items: [target])
         #expect(store.pendingDeletion == nil)
         await store.confirmDeletion(DeletionPlan(selection: [target]))
@@ -452,8 +451,8 @@ struct XcodeSweepStoreTests {
         let deleteTask = Task { await store.confirmDeletion(pending) }
         let trashCall = try await trasher.nextPendingCall()
 
-        #expect(store.isDeleting)
-        #expect(!store.canRefresh)
+        #expect(store.operation.isDeleting)
+        #expect(store.operation.isBusy)
         await store.refresh() // must no-op immediately while deleting
         #expect(await !controller.hasParkedCall)
 
@@ -470,7 +469,7 @@ struct XcodeSweepStoreTests {
         let (store, fixture) = try await makeScannedStore()
         defer { fixture.cleanup() }
 
-        #expect(!store.isScanning)
+        #expect(!store.operation.isScanning)
         #expect(store.operation == .idle)
     }
 
