@@ -48,15 +48,7 @@ enum OperationState: Equatable, Sendable {
 final class XcodeSweepStore {
     // MARK: - Stored UI State
 
-    var sidebarSelection: SidebarSelection = .overview {
-        didSet {
-            if oldValue != sidebarSelection {
-                selectedItemIDs.removeAll()
-                statusFilter = .all
-                searchText = ""
-            }
-        }
-    }
+    private(set) var sidebarSelection: SidebarSelection = .overview
 
     var selectedItemIDs: Set<StorageItem.ID> = []
     var searchText = ""
@@ -188,10 +180,22 @@ final class XcodeSweepStore {
         operation.isScanning(category)
     }
 
+    // MARK: - Navigation
+
+    /// Moves to `destination`. A new destination starts with no selection, filter, or search;
+    /// re-selecting the current one keeps what the user set.
+    func navigate(to destination: SidebarSelection) {
+        guard destination != sidebarSelection else { return }
+        sidebarSelection = destination
+        selectedItemIDs.removeAll()
+        statusFilter = .all
+        searchText = ""
+    }
+
     // MARK: - Selection Helpers
 
     func openCategoryAndSelectReclaimable(_ category: StorageCategory) {
-        sidebarSelection = .category(category)
+        navigate(to: .category(category))
         statusFilter = .reclaimable
         let candidates = inventory.items(in: category).filter(\.isReclaimableCandidate)
         selectedItemIDs = Set(candidates.map(\.id))
