@@ -12,6 +12,7 @@ enum DirectorySizer {
     ]
 
     /// Returns the total allocated bytes on disk for `url` (file or directory).
+    ///
     /// Does not follow symbolic links into external directories.
     static func allocatedSize(of url: URL) -> Int64 {
         let fileManager = FileManager.default

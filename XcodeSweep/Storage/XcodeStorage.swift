@@ -23,15 +23,15 @@ enum DeletionEvent: Equatable, Sendable {
     case completed(DeletionReport)
 }
 
-/// Deep module owning local Xcode and CoreSimulator storage inspection and safe cleanup.
-/// All external seams live strictly at the OS edges: root directory URL, command execution,
-/// file trashing, and reference clock.
+/// Inspects and cleans local Xcode and CoreSimulator storage.
 struct XcodeStorage: Sendable {
     static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
 
+    /// The Xcode data folder, `~/Library/Developer/Xcode` by default.
     let xcodeRootURL: URL
     let commandRunner: any CommandRunning
     let fileTrasher: any FileTrashing
+    /// The clock that stamps scans and ages items.
     let now: @Sendable () -> Date
 
     init(
@@ -49,20 +49,22 @@ struct XcodeStorage: Sendable {
 
     // MARK: - Scanning
 
-    /// Scans all storage categories concurrently, streaming per-category results as they finish
-    /// followed by a single `.completed(ScanSnapshot)` stamped with `now()`.
-    /// When cancellation is observed during `next()`, child scan tasks are cancelled, full producer
-    /// teardown is awaited, and `CancellationError` is thrown. Breaking out of iteration early
-    /// requests producer cancellation on iterator release without awaiting teardown or throwing.
+    /// Scans all storage categories concurrently, streaming each category's results, then a snapshot.
+    ///
+    /// The `.completed(ScanSnapshot)` event is stamped with `now()`. When cancellation is observed
+    /// during `next()`, child scan tasks are cancelled, full producer teardown is awaited, and
+    /// `CancellationError` is thrown. Breaking out of iteration early requests producer
+    /// cancellation on iterator release without awaiting teardown or throwing.
     func scan() -> some AsyncSequence<ScanEvent, any Error> & Sendable {
         StructuredScanStream(storage: self)
     }
 
     // MARK: - Deletion
 
-    /// Deletes the plan's deletable items sequentially in order, streaming start and per-item outcomes
-    /// followed by `.completed(DeletionReport)`. Protected items never reach deletion: the plan sets them aside.
-    /// Pull-based iteration provides natural backpressure.
+    /// Deletes the plan's deletable items one at a time, streaming each outcome and then a report.
+    ///
+    /// Protected items are never deleted. Each item is deleted only when the next event is requested.
+    ///
     /// Cancellation is cooperative: once observed, no subsequent items are started and `CancellationError`
     /// is never recorded as a `DeletionFailure`; an in-flight `FileTrashing` move that cannot be interrupted
     /// may complete and emit its outcome before cancellation is thrown on the next pull.
@@ -86,6 +88,9 @@ struct XcodeStorage: Sendable {
 
     // MARK: - Shared Internal Helpers
 
+    /// Inspects `inputs` concurrently, returning the items found sorted largest first.
+    ///
+    /// Inputs not yet started when the task is cancelled are skipped.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
         inspect: @escaping @Sendable (Input) -> StorageItem?
@@ -108,6 +113,7 @@ struct XcodeStorage: Sendable {
         }
     }
 
+    /// The dictionary in the property list at `url`; `nil` if unreadable or not a dictionary.
     static func loadPlist(at url: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: url),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
@@ -169,6 +175,8 @@ private final class ScanProducerHandle: Sendable {
     }
 }
 
+/// The `scan()` sequence: a detached producer task feeds the iterator, and iterator cancellation
+/// waits for that task to finish.
 private struct StructuredScanStream: AsyncSequence, Sendable {
     typealias Element = ScanEvent
 
@@ -332,6 +340,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 
 // MARK: - Private Pull-Based Deletion Stream
 
+/// The `delete(_:)` sequence: each `next()` call deletes at most one item.
 private struct DeletionStream: AsyncSequence, Sendable {
     typealias Element = DeletionEvent
 

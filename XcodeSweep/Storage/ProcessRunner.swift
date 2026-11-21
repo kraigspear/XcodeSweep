@@ -3,9 +3,13 @@ import os
 
 /// Runs external command-line tools such as `/usr/bin/xcrun`.
 protocol CommandRunning: Sendable {
+    /// Runs `executableURL` with `arguments` to completion and returns its output.
+    ///
+    /// - Throws: An implementation-specific error when the command can't run or fails.
     func run(executableURL: URL, arguments: [String]) async throws -> CommandOutput
 }
 
+/// Captured output and exit status of a finished command.
 struct CommandOutput: Equatable, Sendable {
     let stdout: Data
     let stderr: Data
@@ -20,6 +24,7 @@ struct CommandOutput: Equatable, Sendable {
     }
 }
 
+/// A command that couldn't launch or exited with a nonzero status.
 enum ProcessRunnerError: LocalizedError, Sendable {
     case launchFailed(command: String, underlying: String)
     case nonZeroExit(command: String, status: Int32, stderr: String)
@@ -45,6 +50,8 @@ enum ProcessRunnerError: LocalizedError, Sendable {
 /// it does not wait for the child or a descendant holding a pipe to exit. The pipes close at their
 /// next activity or when the direct child exits, whichever comes first.
 struct ProcessRunner: CommandRunning, Sendable {
+    /// - Throws: `ProcessRunnerError` when launch fails or the exit status is nonzero, or
+    ///   `CancellationError` when the task is cancelled.
     func run(executableURL: URL, arguments: [String]) async throws -> CommandOutput {
         let run = Run(
             executableURL: executableURL,

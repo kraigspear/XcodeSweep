@@ -3,6 +3,7 @@ import Foundation
 /// Status filter offered above a category table.
 enum ItemFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
     case all
+    /// Reclaimable items; titled "Recommended".
     case reclaimable
     case orphaned
     case worktree

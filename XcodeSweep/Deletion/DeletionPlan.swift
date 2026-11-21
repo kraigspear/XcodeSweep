@@ -1,11 +1,12 @@
 import Foundation
 
-/// What a cleanup of a raw selection will remove, and the copy every deletion surface shows for it.
+/// The items a deletion will remove, and the text every deletion control shows for them.
 ///
-/// Protected items are partitioned out here so no caller has to pre-filter the selection.
+/// Pass the raw selection: protected items are counted in `protectedCount` and never deleted.
 struct DeletionPlan: Identifiable, Equatable, Sendable {
     let id = UUID()
     let deletableItems: [StorageItem]
+    /// Selected items that can't be deleted.
     let protectedCount: Int
 
     init(selection: [StorageItem]) {
@@ -25,10 +26,12 @@ struct DeletionPlan: Identifiable, Equatable, Sendable {
         deletableItems.count - permanentCount
     }
 
+    /// Items deleted with `simctl`, which can't be undone.
     var permanentCount: Int {
         deletableItems.filter(\.deletionMethod.isPermanent).count
     }
 
+    /// Simulators marked booted at scan time; deletion tries to shut them down first.
     var bootedDeviceCount: Int {
         deletableItems.filter {
             if case .simctlDevice(_, isBooted: true) = $0.deletionMethod {
@@ -38,6 +41,9 @@ struct DeletionPlan: Identifiable, Equatable, Sendable {
         }.count
     }
 
+    /// The counted button title, such as "Move 2 Items to Trash".
+    ///
+    /// The verb is "Delete" when every item is permanent and "Remove" for a mix.
     var actionTitle: String {
         let count = deletableItems.count
         let noun = count == 1 ? "Item" : "Items"
@@ -55,6 +61,7 @@ struct DeletionPlan: Identifiable, Equatable, Sendable {
         isEmpty ? "Delete Selected…" : "\(actionTitle)…"
     }
 
+    /// Confirmation text giving the space reclaimed and what will be trashed, deleted permanently, or shut down.
     var confirmationMessage: String {
         let formattedSize = ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file)
         var parts: [String] = []
@@ -107,6 +114,7 @@ struct DeletionReport: Equatable, Identifiable, Sendable {
     }
 }
 
+/// An item that failed to delete, and why.
 struct DeletionFailure: Identifiable, Equatable, Sendable {
     let id = UUID()
     let itemID: StorageItem.ID
@@ -115,6 +123,7 @@ struct DeletionFailure: Identifiable, Equatable, Sendable {
 }
 
 extension DeletionMethod {
+    /// How the item is removed, in words for the inspector.
     var cleanupDescription: String {
         switch self {
         case .trashFile:
