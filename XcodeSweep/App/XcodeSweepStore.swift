@@ -278,3 +278,20 @@ final class XcodeSweepStore {
         selectedItemIDs.formIntersection(validIDs)
     }
 }
+
+#if DEBUG && canImport(SwiftUI)
+    extension XcodeSweepStore {
+        /// A store already holding `inventory`, backed by `XcodeStorage.preview`.
+        static func preview(
+            inventory: StorageInventory = .preview,
+            destination: SidebarSelection = .overview,
+            selectedItemIDs: Set<StorageItem.ID> = []
+        ) -> XcodeSweepStore {
+            let store = XcodeSweepStore(xcodeStorage: .preview)
+            store.inventory = inventory
+            store.navigate(to: destination)
+            store.selectedItemIDs = selectedItemIDs
+            return store
+        }
+    }
+#endif

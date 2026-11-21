@@ -113,3 +113,10 @@ private struct DiskFooterView: View {
         .background(.bar)
     }
 }
+
+#if DEBUG && canImport(SwiftUI)
+    #Preview {
+        SidebarView(store: .preview())
+            .frame(width: 250, height: 500)
+    }
+#endif

@@ -132,3 +132,15 @@ private struct DeletionProgressBar: View {
         return "Removing \(progress.currentItemName)…"
     }
 }
+
+#if DEBUG && canImport(SwiftUI)
+    #Preview("Overview") {
+        ContentView(store: .preview())
+            .frame(width: 1180, height: 760)
+    }
+
+    #Preview("DerivedData with selection") {
+        ContentView(store: .preview(destination: .category(.derivedData), selectedItemIDs: ["dd-orphan"]))
+            .frame(width: 1180, height: 760)
+    }
+#endif

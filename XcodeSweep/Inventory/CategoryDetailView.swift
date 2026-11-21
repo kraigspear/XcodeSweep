@@ -269,3 +269,15 @@ private struct SelectionActionFooter: View {
         .background(.bar)
     }
 }
+
+#if DEBUG && canImport(SwiftUI)
+    #Preview("Simulator Runtimes") {
+        CategoryDetailView(category: .simulatorRuntimes, store: .preview(destination: .category(.simulatorRuntimes)))
+            .frame(width: 900, height: 500)
+    }
+
+    #Preview("Empty category") {
+        CategoryDetailView(category: .derivedData, store: .preview(inventory: .empty))
+            .frame(width: 900, height: 500)
+    }
+#endif
