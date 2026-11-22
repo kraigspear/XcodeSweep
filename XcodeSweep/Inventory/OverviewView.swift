@@ -12,7 +12,7 @@ struct OverviewView: View {
                     totalItems: store.inventory.totalItemCount,
                     reclaimableBytes: store.inventory.reclaimableBytes,
                     reclaimableItems: store.inventory.reclaimableItemCount,
-                    diskAvailableBytes: store.inventory.diskAvailableBytes,
+                    diskAvailableBytes: store.inventory.volume?.availableBytes,
                     isScanning: store.operation.isScanning
                 )
 

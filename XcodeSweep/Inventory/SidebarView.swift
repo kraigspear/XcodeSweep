@@ -25,10 +25,7 @@ struct SidebarView: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            DiskFooterView(
-                availableBytes: store.inventory.diskAvailableBytes,
-                totalBytes: store.inventory.diskTotalBytes
-            )
+            DiskFooterView(volume: store.inventory.volume)
         }
     }
 }
@@ -84,21 +81,20 @@ private struct SidebarCategoryRow: View {
 }
 
 private struct DiskFooterView: View {
-    let availableBytes: Int64?
-    let totalBytes: Int64?
+    let volume: DiskVolume?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Divider()
-            if let availableBytes, let totalBytes, totalBytes > 0 {
-                let usedFraction = max(0, min(1, 1 - (Double(availableBytes) / Double(totalBytes))))
+            if let volume, volume.totalBytes > 0 {
+                let usedFraction = max(0, min(1, 1 - (Double(volume.availableBytes) / Double(volume.totalBytes))))
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Macintosh HD")
+                        Text(volume.name)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(availableBytes, format: .byteCount(style: .file)) free")
+                        Text("\(volume.availableBytes, format: .byteCount(style: .file)) free")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.primary)
                     }

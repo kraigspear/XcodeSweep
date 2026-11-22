@@ -189,7 +189,11 @@ struct XcodeStorageScanTests {
         // Volume capacity and injected clock timestamp should be populated on the snapshot.
         #expect(snapshot.scannedAt == referenceNow)
         #expect(snapshot.warnings.isEmpty)
-        #expect((snapshot.diskTotalBytes ?? 0) > 0)
+        let expectedVolumeName = try fixture.xcodeRootURL
+            .resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        let volume = try #require(snapshot.volume)
+        #expect(volume.name == expectedVolumeName)
+        #expect(volume.totalBytes > 0)
 
         // DerivedData: 4 folders (ModuleCache.noindex excluded)
         let derived = try #require(snapshot.itemsByCategory[.derivedData])
@@ -316,5 +320,98 @@ struct XcodeStorageScanTests {
         let runtimesCall = try #require(calls.first { $0.arguments == ["simctl", "runtime", "list", "-j"] })
         #expect(devicesCall.timeout == XcodeStorage.simctlListTimeout)
         #expect(runtimesCall.timeout == XcodeStorage.simctlListTimeout)
+    }
+
+    @Test("Classifies DerivedData as orphaned only when its workspace is provably gone")
+    func unreachableWorkspaceIsNotOrphaned() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+
+        // A workspace inside a folder this user can't search, as with a TCC denial.
+        let lockedFolder = fixture.rootURL.appendingPathComponent("Locked", isDirectory: true)
+        let lockedWorkspace = lockedFolder.appendingPathComponent("Locked.xcodeproj")
+        try FileManager.default.createDirectory(at: lockedWorkspace, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: lockedFolder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lockedFolder.path) }
+
+        try fixture.addDerivedData(
+            folderName: "Locked-1",
+            workspacePath: lockedWorkspace.path,
+            lastAccessed: now
+        )
+        try fixture.addDerivedData(
+            folderName: "Unmounted-2",
+            workspacePath: "/Volumes/XcodeSweep-Unmounted-\(UUID().uuidString)/Unmounted.xcodeproj",
+            lastAccessed: now
+        )
+        // A project folder symlinked to an ejected drive.
+        let linkedFolder = fixture.rootURL.appendingPathComponent("LinkedProjects")
+        try FileManager.default.createSymbolicLink(
+            atPath: linkedFolder.path,
+            withDestinationPath: "/Volumes/XcodeSweep-Ejected-\(UUID().uuidString)/Projects"
+        )
+        try fixture.addDerivedData(
+            folderName: "Linked-4",
+            workspacePath: linkedFolder.appendingPathComponent("Linked.xcodeproj").path,
+            lastAccessed: now
+        )
+        // The same unmounted volume, spelled through the Data volume's firmlink.
+        try fixture.addDerivedData(
+            folderName: "DataVolumes-5",
+            workspacePath: "/System/Volumes/Data/Volumes/XcodeSweep-Unmounted-\(UUID().uuidString)/DataVolumes.xcodeproj",
+            lastAccessed: now
+        )
+        // A folder in the recorded path is now a regular file.
+        let fileInPath = fixture.rootURL.appendingPathComponent("NowAFile")
+        try Data("x".utf8).write(to: fileInPath)
+        try fixture.addDerivedData(
+            folderName: "Replaced-6",
+            workspacePath: fileInPath.appendingPathComponent("Replaced.xcodeproj").path,
+            lastAccessed: now
+        )
+        try fixture.addDerivedData(
+            folderName: "Gone-3",
+            workspacePath: fixture.rootURL.appendingPathComponent("Deleted/Gone.xcodeproj").path,
+            lastAccessed: now
+        )
+
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let byName = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.derivedData]).map { ($0.name, $0) }
+        )
+
+        #expect(byName["Locked"]?.status == .active)
+        #expect(byName["Unmounted"]?.status == .active)
+        #expect(byName["Gone"]?.status == .orphaned)
+        #expect(byName["Linked"]?.status == .active)
+        #expect(byName["DataVolumes"]?.status == .active)
+        #expect(byName["Replaced"]?.status == .orphaned)
+        #expect(byName["Locked"]?.isReclaimable == false)
+        #expect(byName["Unmounted"]?.isReclaimable == false)
+    }
+
+    /// The footer once hard-coded "Macintosh HD"; the system VM volume is named "VM", so a hard-coded name fails here.
+    @Test("Snapshot names the volume holding the Xcode folder")
+    func scanReadsNameOfVolumeHoldingXcodeFolder() async throws {
+        let vmVolumeURL = URL(fileURLWithPath: "/System/Volumes/VM")
+        let expectedName = try #require(
+            vmVolumeURL.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        )
+
+        let storage = XcodeStorage(
+            xcodeRootURL: vmVolumeURL.appendingPathComponent("XcodeSweep-Missing-\(UUID().uuidString)/Xcode"),
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher()
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.volume?.name == expectedName)
     }
 }

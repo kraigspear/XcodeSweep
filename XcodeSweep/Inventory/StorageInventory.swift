@@ -5,8 +5,7 @@ import Foundation
 /// Every change returns a new value with totals recomputed, so totals can never go stale relative to items.
 struct StorageInventory: Equatable, Sendable {
     let scannedAt: Date?
-    let diskAvailableBytes: Int64?
-    let diskTotalBytes: Int64?
+    let volume: DiskVolume?
     let categoryMetrics: [CategoryMetrics]
     let totalBytes: Int64
     let reclaimableBytes: Int64
@@ -19,20 +18,17 @@ struct StorageInventory: Equatable, Sendable {
     static let empty = StorageInventory(
         itemsByCategory: [:],
         scannedAt: nil,
-        diskAvailableBytes: nil,
-        diskTotalBytes: nil
+        volume: nil
     )
 
     init(
         itemsByCategory: [StorageCategory: [StorageItem]],
         scannedAt: Date?,
-        diskAvailableBytes: Int64?,
-        diskTotalBytes: Int64?
+        volume: DiskVolume?
     ) {
         self.itemsByCategory = itemsByCategory
         self.scannedAt = scannedAt
-        self.diskAvailableBytes = diskAvailableBytes
-        self.diskTotalBytes = diskTotalBytes
+        self.volume = volume
 
         categoryMetrics = StorageCategory.allCases.map { category in
             let items = itemsByCategory[category] ?? []
@@ -59,8 +55,7 @@ struct StorageInventory: Equatable, Sendable {
         self.init(
             itemsByCategory: snapshot.itemsByCategory,
             scannedAt: snapshot.scannedAt,
-            diskAvailableBytes: snapshot.diskAvailableBytes,
-            diskTotalBytes: snapshot.diskTotalBytes
+            volume: snapshot.volume
         )
     }
 
@@ -113,8 +108,7 @@ struct StorageInventory: Equatable, Sendable {
         StorageInventory(
             itemsByCategory: items,
             scannedAt: scannedAt,
-            diskAvailableBytes: diskAvailableBytes,
-            diskTotalBytes: diskTotalBytes
+            volume: volume
         )
     }
 }

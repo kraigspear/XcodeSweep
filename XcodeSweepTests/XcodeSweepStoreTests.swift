@@ -532,14 +532,46 @@ struct XcodeSweepStoreTests {
         #expect(store.selectedItemIDs == Set(reclaimableItems.map(\.id)))
     }
 
-    private func makeScannedStore() async throws -> (XcodeSweepStore, TempXcodeFixture) {
+    @Test("Rows hidden by search or filter are never part of the selection plan")
+    func hiddenSelectedRowsAreExcludedFromDeletion() async throws {
+        let (store, fixture) = try await makeScannedStore(extraDerivedDataFolders: ["OtherApp-new"])
+        defer { fixture.cleanup() }
+
+        // Given: both DerivedData rows selected
+        store.navigate(to: .category(.derivedData))
+        store.selectAllDeletableInActiveCategory()
+        #expect(store.selectedItemIDs.count == 2)
+
+        // When: a search hides one of them
+        store.searchText = "SampleApp"
+
+        // Then: only the visible row is acted on
+        let visibleIDs = store.visibleItems(for: .derivedData).map(\.id)
+        #expect(visibleIDs.count == 1)
+        #expect(store.selectedItems.map(\.id) == visibleIDs)
+        #expect(store.selectionPlan.deletableItems.map(\.id) == visibleIDs)
+        store.requestDeleteSelected()
+        #expect(store.pendingDeletion?.deletableItems.map(\.id) == visibleIDs)
+
+        // A status filter hiding every selected row leaves nothing to delete.
+        store.searchText = ""
+        store.statusFilter = .worktree
+        #expect(store.selectedItems.isEmpty)
+        #expect(store.selectionPlan.isEmpty)
+    }
+
+    private func makeScannedStore(
+        extraDerivedDataFolders: [String] = []
+    ) async throws -> (XcodeSweepStore, TempXcodeFixture) {
         let fixture = try TempXcodeFixture()
         let now = testISO8601Date("2026-11-21T10:00:00Z")
-        _ = try fixture.addDerivedData(
-            folderName: "SampleApp-old",
-            workspacePath: "/nonexistent/SampleApp-old.xcodeproj",
-            lastAccessed: now
-        )
+        for folderName in ["SampleApp-old"] + extraDerivedDataFolders {
+            _ = try fixture.addDerivedData(
+                folderName: folderName,
+                workspacePath: "/nonexistent/\(folderName).xcodeproj",
+                lastAccessed: now
+            )
+        }
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),

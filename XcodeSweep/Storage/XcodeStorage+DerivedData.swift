@@ -35,8 +35,10 @@ extension XcodeStorage {
         let lastAccessed = (plist?["LastAccessedDate"] as? Date) ?? modificationDate(of: folderURL)
         let sizeBytes = DirectorySizer.allocatedSize(of: folderURL)
 
+        let presence = workspacePath.map(workspacePresence(atPath:)) ?? .missing
         let status = classifyDerivedDataStatus(
             workspacePath: workspacePath,
+            presence: presence,
             lastAccessed: lastAccessed,
             now: now,
             fileManager: fileManager
@@ -51,8 +53,7 @@ extension XcodeStorage {
         ]
         if let workspacePath {
             metadata.append(MetadataEntry(key: "Workspace", value: workspacePath))
-            let exists = fileManager.fileExists(atPath: workspacePath)
-            metadata.append(MetadataEntry(key: "Workspace Exists", value: exists ? "Yes" : "No (Deleted or Moved)"))
+            metadata.append(MetadataEntry(key: "Workspace Exists", value: presence.label))
         } else {
             metadata.append(MetadataEntry(key: "Workspace", value: "Missing info.plist"))
         }
@@ -74,11 +75,12 @@ extension XcodeStorage {
 
     private static func classifyDerivedDataStatus(
         workspacePath: String?,
+        presence: WorkspacePresence,
         lastAccessed: Date?,
         now: Date,
         fileManager: FileManager
     ) -> ItemStatus {
-        guard let workspacePath, !workspacePath.isEmpty, fileManager.fileExists(atPath: workspacePath) else {
+        guard let workspacePath, !workspacePath.isEmpty, presence != .missing else {
             return .orphaned
         }
 
@@ -87,6 +89,52 @@ extension XcodeStorage {
         }
 
         return StorageCategory.derivedData.ageStatus(lastUsed: lastAccessed, now: now)
+    }
+
+    /// Whether the workspace at `path` exists, is provably gone, or can't be checked.
+    ///
+    /// Gone means `ENOENT` or `ENOTDIR` all the way up to an ancestor that exists: path lookup
+    /// through a searchable folder is authoritative. A permission or TCC denial, a dangling
+    /// symlink, or a missing mount point in `/Volumes` is unreachable: the project may be fine.
+    private static func workspacePresence(atPath path: String) -> WorkspacePresence {
+        var current = URL(fileURLWithPath: path)
+        switch fileStatus(current.path).error {
+        case 0:
+            return .present
+        case ENOENT, ENOTDIR:
+            break
+        default:
+            return .unreachable
+        }
+
+        while true {
+            // A link that resolves nowhere may point at a drive that is ejected.
+            if fileStatus(current.path, followingLinks: false).error == 0 {
+                return .unreachable
+            }
+            current.deleteLastPathComponent()
+            let ancestor = fileStatus(current.path)
+            switch ancestor.error {
+            case 0:
+                return isVolumesFolder(ancestor.info) ? .unreachable : .missing
+            case ENOENT, ENOTDIR:
+                continue
+            default:
+                return .unreachable
+            }
+        }
+    }
+
+    /// Compared by identity, since `/Volumes` is also reachable as `/System/Volumes/Data/Volumes`.
+    private static func isVolumesFolder(_ info: stat) -> Bool {
+        let volumes = fileStatus("/Volumes")
+        return volumes.error == 0 && volumes.info.st_dev == info.st_dev && volumes.info.st_ino == info.st_ino
+    }
+
+    private static func fileStatus(_ path: String, followingLinks: Bool = true) -> (error: Int32, info: stat) {
+        var info = stat()
+        let result = followingLinks ? stat(path, &info) : lstat(path, &info)
+        return (result == 0 ? 0 : errno, info)
     }
 
     /// Detects git worktrees either by path convention or by finding a `.git` file (worktree pointer) walking upward.
@@ -146,5 +194,22 @@ extension XcodeStorage {
             return "Missing: \(shortened)"
         }
         return shortened
+    }
+}
+
+/// Whether a DerivedData folder's recorded workspace is still on disk.
+private enum WorkspacePresence: Equatable, Sendable {
+    case present
+    /// Provably gone: lookup fails with `ENOENT` or `ENOTDIR` up to the nearest existing ancestor.
+    case missing
+    /// Couldn't be checked, such as a denied folder, a dangling symlink, or an unmounted volume.
+    case unreachable
+
+    var label: String {
+        switch self {
+        case .present: "Yes"
+        case .missing: "No (Deleted or Moved)"
+        case .unreachable: "Unknown (Not Accessible)"
+        }
     }
 }
