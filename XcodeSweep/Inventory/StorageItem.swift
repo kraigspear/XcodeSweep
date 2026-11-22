@@ -32,7 +32,7 @@ enum DeletionMethod: Equatable, Hashable, Sendable {
 enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
     /// Not unused by age: used within `staleAfterDays`, last use unknown, or a category that never ages.
     case active
-    /// DerivedData whose recorded workspace path is missing or no longer exists.
+    /// DerivedData with no recorded workspace, or whose workspace is provably gone.
     case orphaned
     /// DerivedData whose workspace path looks like a git worktree: it contains "worktree" or sits under a `.git` file.
     case worktree
