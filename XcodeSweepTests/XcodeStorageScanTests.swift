@@ -297,6 +297,31 @@ struct XcodeStorageScanTests {
             workspacePath: "/Volumes/XcodeSweep-Unmounted-\(UUID().uuidString)/Unmounted.xcodeproj",
             lastAccessed: now
         )
+        // A project folder symlinked to an ejected drive.
+        let linkedFolder = fixture.rootURL.appendingPathComponent("LinkedProjects")
+        try FileManager.default.createSymbolicLink(
+            atPath: linkedFolder.path,
+            withDestinationPath: "/Volumes/XcodeSweep-Ejected-\(UUID().uuidString)/Projects"
+        )
+        try fixture.addDerivedData(
+            folderName: "Linked-4",
+            workspacePath: linkedFolder.appendingPathComponent("Linked.xcodeproj").path,
+            lastAccessed: now
+        )
+        // The same unmounted volume, spelled through the Data volume's firmlink.
+        try fixture.addDerivedData(
+            folderName: "DataVolumes-5",
+            workspacePath: "/System/Volumes/Data/Volumes/XcodeSweep-Unmounted-\(UUID().uuidString)/DataVolumes.xcodeproj",
+            lastAccessed: now
+        )
+        // A folder in the recorded path is now a regular file.
+        let fileInPath = fixture.rootURL.appendingPathComponent("NowAFile")
+        try Data("x".utf8).write(to: fileInPath)
+        try fixture.addDerivedData(
+            folderName: "Replaced-6",
+            workspacePath: fileInPath.appendingPathComponent("Replaced.xcodeproj").path,
+            lastAccessed: now
+        )
         try fixture.addDerivedData(
             folderName: "Gone-3",
             workspacePath: fixture.rootURL.appendingPathComponent("Deleted/Gone.xcodeproj").path,
@@ -317,6 +342,9 @@ struct XcodeStorageScanTests {
         #expect(byName["Locked"]?.status == .active)
         #expect(byName["Unmounted"]?.status == .active)
         #expect(byName["Gone"]?.status == .orphaned)
+        #expect(byName["Linked"]?.status == .active)
+        #expect(byName["DataVolumes"]?.status == .active)
+        #expect(byName["Replaced"]?.status == .orphaned)
         #expect(byName["Locked"]?.isReclaimable == false)
         #expect(byName["Unmounted"]?.isReclaimable == false)
     }
