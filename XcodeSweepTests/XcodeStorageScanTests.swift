@@ -277,4 +277,25 @@ struct XcodeStorageScanTests {
         #expect(snapshot.itemsByCategory[.simulatorRuntimes] == [])
         #expect(snapshot.warnings.count == 2)
     }
+
+    /// The footer once hard-coded "Macintosh HD", so this reads a volume that is never named that.
+    @Test("Snapshot names the volume holding the Xcode folder")
+    func scanReadsNameOfVolumeHoldingXcodeFolder() async throws {
+        let vmVolumeURL = URL(fileURLWithPath: "/System/Volumes/VM")
+        let expectedName = try #require(
+            vmVolumeURL.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        )
+        let bootName = try URL(fileURLWithPath: NSHomeDirectory())
+            .resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        try #require(expectedName != bootName, "Fixture volume must differ from the boot volume")
+
+        let storage = XcodeStorage(
+            xcodeRootURL: vmVolumeURL.appendingPathComponent("XcodeSweep-Missing-\(UUID().uuidString)/Xcode"),
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher()
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.volume?.name == expectedName)
+    }
 }
