@@ -36,7 +36,7 @@ struct StorageInventory: Equatable, Sendable {
 
         categoryMetrics = StorageCategory.allCases.map { category in
             let items = itemsByCategory[category] ?? []
-            let reclaimable = items.filter(\.isReclaimableCandidate)
+            let reclaimable = items.filter(\.isReclaimable)
             return CategoryMetrics(
                 category: category,
                 itemCount: items.count,

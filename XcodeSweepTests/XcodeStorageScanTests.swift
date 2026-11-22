@@ -196,9 +196,9 @@ struct XcodeStorageScanTests {
         #expect(derived.count == 4)
         let derivedByName = Dictionary(uniqueKeysWithValues: derived.map { ($0.name, $0) })
         #expect(derivedByName["OrphanedApp"]?.status == .orphaned)
-        #expect(derivedByName["OrphanedApp"]?.isReclaimableCandidate == true)
+        #expect(derivedByName["OrphanedApp"]?.isReclaimable == true)
         #expect(derivedByName["LinkedApp"]?.status == .worktree)
-        #expect(derivedByName["LinkedApp"]?.isReclaimableCandidate == false)
+        #expect(derivedByName["LinkedApp"]?.isReclaimable == false)
         #expect(derivedByName["OldApp"]?.status == .stale)
         #expect(derivedByName["ActiveApp"]?.status == .active)
 
@@ -220,7 +220,7 @@ struct XcodeStorageScanTests {
         #expect(devicesByName["iPhone 17 Pro"]?.status == .booted)
         #expect(devicesByName["iPhone 17 Pro"]?.deletionMethod == .simctlDevice(udid: "AAA", isBooted: true))
         #expect(devicesByName["iPhone 15"]?.status == .unavailable)
-        #expect(devicesByName["iPhone 15"]?.isReclaimableCandidate == true)
+        #expect(devicesByName["iPhone 15"]?.isReclaimable == true)
         #expect(devicesByName["iPhone 14 Stale"]?.status == .stale)
 
         // DeviceSupport: 45d threshold

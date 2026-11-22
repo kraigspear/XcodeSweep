@@ -64,15 +64,15 @@ enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
         }
     }
 
-    /// Plain-language list of the statuses that count toward recommended cleanup.
-    static var cleanupRecommendationSummary: String {
-        let labels = allCases.filter(\.isRecommendedForCleanup).map { $0.label.lowercased() }
+    /// Plain-language list of the reclaimable statuses, such as "orphaned, unavailable, or unused".
+    static var reclaimableStatusSummary: String {
+        let labels = allCases.filter(\.isReclaimable).map { $0.label.lowercased() }
         guard labels.count > 1, let last = labels.last else { return labels.first ?? "" }
         return labels.dropLast().joined(separator: ", ") + ", or " + last
     }
 
-    /// Whether items with this status are recommended for cleanup.
-    var isRecommendedForCleanup: Bool {
+    /// Whether a deletable item with this status is reclaimable.
+    var isReclaimable: Bool {
         switch self {
         case .orphaned, .unavailable, .stale:
             true
@@ -103,9 +103,9 @@ struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
         deletionMethod.isDeletable
     }
 
-    /// Whether the item is deletable and its status is recommended for cleanup.
-    var isReclaimableCandidate: Bool {
-        isDeletable && status.isRecommendedForCleanup
+    /// Whether the item is deletable and its status is reclaimable.
+    var isReclaimable: Bool {
+        isDeletable && status.isReclaimable
     }
 
     /// `lastUsedDate` as seconds since 1970; items never used sort as 0.

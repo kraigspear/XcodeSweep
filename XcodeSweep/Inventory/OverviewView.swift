@@ -63,7 +63,7 @@ private struct OverviewKPIHeader: View {
                 SummaryStatCard(
                     title: "Recommended Cleanup",
                     valueText: ByteCountFormatter.string(fromByteCount: reclaimableBytes, countStyle: .file),
-                    footnote: "\(reclaimableItems) \(ItemStatus.cleanupRecommendationSummary)",
+                    footnote: "\(reclaimableItems) \(ItemStatus.reclaimableStatusSummary)",
                     systemImage: "sparkles",
                     tint: .orange
                 )

@@ -89,7 +89,7 @@ struct CategoryDetailView: View {
             SelectionActionFooter(
                 selectionPlan: store.selectionPlan,
                 operation: store.operation,
-                onSelectRecommended: { store.selectReclaimableInActiveCategory() },
+                onSelectReclaimable: { store.selectReclaimableInActiveCategory() },
                 onSelectAll: { store.selectAllDeletableInActiveCategory() },
                 onClearSelection: { store.clearSelection() },
                 onRequestDelete: { store.requestDeleteSelected() }
@@ -216,14 +216,14 @@ private struct ItemContextMenuContent: View {
 private struct SelectionActionFooter: View {
     let selectionPlan: DeletionPlan
     let operation: OperationState
-    let onSelectRecommended: () -> Void
+    let onSelectReclaimable: () -> Void
     let onSelectAll: () -> Void
     let onClearSelection: () -> Void
     let onRequestDelete: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Button("Select Recommended", action: onSelectRecommended)
+            Button("Select Recommended", action: onSelectReclaimable)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(operation.isDeleting)

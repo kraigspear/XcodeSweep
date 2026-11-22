@@ -195,15 +195,15 @@ final class XcodeSweepStore {
     func openCategoryAndSelectReclaimable(_ category: StorageCategory) {
         navigate(to: .category(category))
         statusFilter = .reclaimable
-        let candidates = inventory.items(in: category).filter(\.isReclaimableCandidate)
-        selectedItemIDs = Set(candidates.map(\.id))
+        let reclaimableItems = inventory.items(in: category).filter(\.isReclaimable)
+        selectedItemIDs = Set(reclaimableItems.map(\.id))
     }
 
     /// Selects the visible reclaimable items in the active category.
     func selectReclaimableInActiveCategory() {
         guard let category = activeCategory else { return }
-        let candidates = visibleItems(for: category).filter(\.isReclaimableCandidate)
-        selectedItemIDs = Set(candidates.map(\.id))
+        let reclaimableItems = visibleItems(for: category).filter(\.isReclaimable)
+        selectedItemIDs = Set(reclaimableItems.map(\.id))
     }
 
     /// Selects every visible deletable item in the active category.
