@@ -4,9 +4,16 @@ import Foundation
 struct ScanSnapshot: Equatable, Sendable {
     let scannedAt: Date
     let itemsByCategory: [StorageCategory: [StorageItem]]
-    let diskAvailableBytes: Int64?
-    let diskTotalBytes: Int64?
+    /// The volume holding the Xcode folder; `nil` if it couldn't be read.
+    let volume: DiskVolume?
     let warnings: [String]
+}
+
+/// A volume's display name and capacity.
+struct DiskVolume: Equatable, Sendable {
+    let name: String
+    let availableBytes: Int64
+    let totalBytes: Int64
 }
 
 /// Ordered lifecycle events emitted by `XcodeStorage.scan()`.
@@ -127,16 +134,21 @@ struct XcodeStorage: Sendable {
         try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 
-    fileprivate func readVolumeCapacity() -> (available: Int64?, total: Int64?) {
+    fileprivate func readVolume() -> DiskVolume? {
         let targetURL = nearestExistingDirectory(from: xcodeRootURL)
             ?? FileManager.default.homeDirectoryForCurrentUser
-        let values = try? targetURL.resourceValues(forKeys: [
+        guard let values = try? targetURL.resourceValues(forKeys: [
+            .volumeLocalizedNameKey,
             .volumeAvailableCapacityForImportantUsageKey,
             .volumeTotalCapacityKey,
-        ])
-        let available = values?.volumeAvailableCapacityForImportantUsage
-        let total = values?.volumeTotalCapacity.map(Int64.init)
-        return (available, total)
+        ]),
+            let name = values.volumeLocalizedName,
+            let available = values.volumeAvailableCapacityForImportantUsage,
+            let total = values.volumeTotalCapacity
+        else {
+            return nil
+        }
+        return DiskVolume(name: name, availableBytes: available, totalBytes: Int64(total))
     }
 
     private func nearestExistingDirectory(from url: URL) -> URL? {
@@ -195,7 +207,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                     return
                 }
 
-                let capacity = storage.readVolumeCapacity()
+                let volume = storage.readVolume()
                 let referenceDate = storage.now()
 
                 let snapshot = await withTaskGroup(
@@ -269,8 +281,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                     return ScanSnapshot(
                         scannedAt: referenceDate,
                         itemsByCategory: itemsByCategory,
-                        diskAvailableBytes: capacity.available,
-                        diskTotalBytes: capacity.total,
+                        volume: volume,
                         warnings: warnings
                     )
                 }

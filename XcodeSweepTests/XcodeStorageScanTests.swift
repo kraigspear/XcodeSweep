@@ -189,7 +189,11 @@ struct XcodeStorageScanTests {
         // Volume capacity and injected clock timestamp should be populated on the snapshot.
         #expect(snapshot.scannedAt == referenceNow)
         #expect(snapshot.warnings.isEmpty)
-        #expect((snapshot.diskTotalBytes ?? 0) > 0)
+        let expectedVolumeName = try fixture.xcodeRootURL
+            .resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        let volume = try #require(snapshot.volume)
+        #expect(volume.name == expectedVolumeName)
+        #expect(volume.totalBytes > 0)
 
         // DerivedData: 4 folders (ModuleCache.noindex excluded)
         let derived = try #require(snapshot.itemsByCategory[.derivedData])
@@ -347,5 +351,23 @@ struct XcodeStorageScanTests {
         #expect(byName["Replaced"]?.status == .orphaned)
         #expect(byName["Locked"]?.isReclaimable == false)
         #expect(byName["Unmounted"]?.isReclaimable == false)
+    }
+
+    /// The footer once hard-coded "Macintosh HD"; the system VM volume is named "VM", so a hard-coded name fails here.
+    @Test("Snapshot names the volume holding the Xcode folder")
+    func scanReadsNameOfVolumeHoldingXcodeFolder() async throws {
+        let vmVolumeURL = URL(fileURLWithPath: "/System/Volumes/VM")
+        let expectedName = try #require(
+            vmVolumeURL.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        )
+
+        let storage = XcodeStorage(
+            xcodeRootURL: vmVolumeURL.appendingPathComponent("XcodeSweep-Missing-\(UUID().uuidString)/Xcode"),
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher()
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.volume?.name == expectedName)
     }
 }
