@@ -97,7 +97,7 @@ extension XcodeStorage {
     /// through a searchable folder is authoritative. A permission or TCC denial, a dangling
     /// symlink, or a missing mount point in `/Volumes` is unreachable: the project may be fine.
     private static func workspacePresence(atPath path: String) -> WorkspacePresence {
-        var current = URL(fileURLWithPath: path).standardized
+        var current = URL(fileURLWithPath: path)
         switch fileStatus(current.path).error {
         case 0:
             return .present
