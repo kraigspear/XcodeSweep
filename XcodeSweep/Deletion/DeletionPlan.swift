@@ -3,8 +3,9 @@ import Foundation
 /// The items a deletion will remove, and the text every deletion control shows for them.
 ///
 /// Pass the raw selection: protected items are counted in `protectedCount` and never deleted.
-struct DeletionPlan: Identifiable, Equatable, Sendable {
-    let id = UUID()
+/// Plans with the same deletable items in the same order and the same protected count are equal;
+/// identity is the contents, so SwiftUI sees no change when an unchanged selection mints a new plan.
+struct DeletionPlan: Identifiable, Hashable, Sendable {
     let deletableItems: [StorageItem]
     /// Selected items that can't be deleted.
     let protectedCount: Int
@@ -12,6 +13,10 @@ struct DeletionPlan: Identifiable, Equatable, Sendable {
     init(selection: [StorageItem]) {
         deletableItems = selection.filter(\.isDeletable)
         protectedCount = selection.count - deletableItems.count
+    }
+
+    var id: Self {
+        self
     }
 
     var isEmpty: Bool {
@@ -98,12 +103,15 @@ struct DeletionProgress: Equatable, Sendable {
 }
 
 /// Outcome of a batch deletion operation.
-struct DeletionReport: Equatable, Identifiable, Sendable {
-    let id = UUID()
+struct DeletionReport: Identifiable, Hashable, Sendable {
     let trashedCount: Int
     let simctlDeletedCount: Int
     let reclaimedBytes: Int64
     let failures: [DeletionFailure]
+
+    var id: Self {
+        self
+    }
 
     var deletedCount: Int {
         trashedCount + simctlDeletedCount
@@ -115,8 +123,7 @@ struct DeletionReport: Equatable, Identifiable, Sendable {
 }
 
 /// An item that failed to delete, and why.
-struct DeletionFailure: Identifiable, Equatable, Sendable {
-    let id = UUID()
+struct DeletionFailure: Hashable, Sendable {
     let itemID: StorageItem.ID
     let itemName: String
     let reason: String
