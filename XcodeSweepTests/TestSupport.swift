@@ -450,23 +450,34 @@ func cancelAndAwaitResult<Success: Sendable>(
     of task: Task<Success, any Error>,
     within timeout: Duration
 ) async throws -> Result<Success, any Error> {
-    task.cancel()
-    return try await awaitResult(of: task, within: timeout, waitingFor: "cancelled task finished")
+    try await boundedResult(of: task, within: timeout, cancelling: true, waitingFor: "cancelled task finished")
 }
 
-/// The task's result, or `ConditionTimeoutError` if it doesn't finish within `timeout`.
-///
-/// Waits on a detached observer, so a task that never resumes fails the test instead of hanging it.
+/// The task's result, or `ConditionTimeoutError` if it doesn't finish within `timeout`, so a task
+/// that never resumes fails the test instead of hanging it.
 func awaitResult<Success: Sendable>(
     of task: Task<Success, any Error>,
+    within timeout: Duration
+) async throws -> Result<Success, any Error> {
+    try await boundedResult(of: task, within: timeout, cancelling: false, waitingFor: "task finished")
+}
+
+/// The deadline is set before cancelling, and cancelling happens on the observer, so a slow or
+/// stuck cancellation handler counts against the bound.
+private func boundedResult<Success: Sendable>(
+    of task: Task<Success, any Error>,
     within timeout: Duration,
-    waitingFor description: String = "task finished"
+    cancelling: Bool,
+    waitingFor description: String
 ) async throws -> Result<Success, any Error> {
     let deadline = ContinuousClock.now + timeout
     let outcome = OSAllocatedUnfairLock<(result: Result<Success, any Error>, finishedAt: ContinuousClock.Instant)?>(
         initialState: nil
     )
     Task.detached {
+        if cancelling {
+            task.cancel()
+        }
         let result = await task.result
         let finishedAt = ContinuousClock.now
         outcome.withLock { $0 = (result, finishedAt) }
