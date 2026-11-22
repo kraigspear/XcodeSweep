@@ -7,8 +7,7 @@
         static let preview = StorageInventory(
             itemsByCategory: Dictionary(grouping: StorageItem.previewItems, by: \.category),
             scannedAt: Date(timeIntervalSinceReferenceDate: 800_000_000),
-            diskAvailableBytes: 412_000_000_000,
-            diskTotalBytes: 994_000_000_000
+            volume: DiskVolume(name: "Macintosh HD", availableBytes: 412_000_000_000, totalBytes: 994_000_000_000)
         )
     }
 
