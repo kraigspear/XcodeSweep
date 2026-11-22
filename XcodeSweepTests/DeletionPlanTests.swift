@@ -109,4 +109,22 @@ struct DeletionPlanTests {
         #expect(summary.contains("Item 4: Busy"))
         #expect(!summary.contains("Item 5"))
     }
+
+    @Test("Plans, reports, and failures with the same contents are equal")
+    func deletionValuesCompareByContents() {
+        let selection = [makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd")))]
+        #expect(DeletionPlan(selection: selection) == DeletionPlan(selection: selection))
+        #expect(DeletionPlan(selection: selection).id == DeletionPlan(selection: selection).id)
+
+        let makeFailure = { DeletionFailure(itemID: "f", itemName: "F", reason: "Busy") }
+        #expect(makeFailure() == makeFailure())
+
+        let makeReport = {
+            DeletionReport(trashedCount: 1, simctlDeletedCount: 0, reclaimedBytes: 100, failures: [makeFailure()])
+        }
+        #expect(makeReport() == makeReport())
+        #expect(DeletionEvent.completed(makeReport()) == .completed(makeReport()))
+
+        #expect(DeletionPlan(selection: selection) != DeletionPlan(selection: []))
+    }
 }
