@@ -35,8 +35,10 @@ extension XcodeStorage {
         let lastAccessed = (plist?["LastAccessedDate"] as? Date) ?? modificationDate(of: folderURL)
         let sizeBytes = DirectorySizer.allocatedSize(of: folderURL)
 
+        let presence = workspacePath.map(workspacePresence(atPath:)) ?? .missing
         let status = classifyDerivedDataStatus(
             workspacePath: workspacePath,
+            presence: presence,
             lastAccessed: lastAccessed,
             now: now,
             fileManager: fileManager
@@ -51,8 +53,7 @@ extension XcodeStorage {
         ]
         if let workspacePath {
             metadata.append(MetadataEntry(key: "Workspace", value: workspacePath))
-            let exists = fileManager.fileExists(atPath: workspacePath)
-            metadata.append(MetadataEntry(key: "Workspace Exists", value: exists ? "Yes" : "No (Deleted or Moved)"))
+            metadata.append(MetadataEntry(key: "Workspace Exists", value: presence.label))
         } else {
             metadata.append(MetadataEntry(key: "Workspace", value: "Missing info.plist"))
         }
@@ -74,11 +75,12 @@ extension XcodeStorage {
 
     private static func classifyDerivedDataStatus(
         workspacePath: String?,
+        presence: WorkspacePresence,
         lastAccessed: Date?,
         now: Date,
         fileManager: FileManager
     ) -> ItemStatus {
-        guard let workspacePath, !workspacePath.isEmpty, fileManager.fileExists(atPath: workspacePath) else {
+        guard let workspacePath, !workspacePath.isEmpty, presence != .missing else {
             return .orphaned
         }
 
@@ -87,6 +89,39 @@ extension XcodeStorage {
         }
 
         return StorageCategory.derivedData.ageStatus(lastUsed: lastAccessed, now: now)
+    }
+
+    /// Whether the workspace at `path` exists, is provably gone, or can't be checked.
+    ///
+    /// Only `ENOENT` on a reachable parent proves it gone. A permission or TCC denial, or a path on
+    /// a volume that isn't mounted, is unreachable: the project may be fine.
+    private static func workspacePresence(atPath path: String) -> WorkspacePresence {
+        switch statErrno(path) {
+        case 0:
+            return .present
+        case ENOENT, ENOTDIR:
+            break
+        default:
+            return .unreachable
+        }
+
+        var ancestor = URL(fileURLWithPath: path).standardized.deletingLastPathComponent()
+        while true {
+            switch statErrno(ancestor.path) {
+            case 0:
+                // A missing mount point under /Volumes is an unmounted volume.
+                return ancestor.path == "/Volumes" ? .unreachable : .missing
+            case ENOENT, ENOTDIR:
+                ancestor.deleteLastPathComponent()
+            default:
+                return .unreachable
+            }
+        }
+    }
+
+    private static func statErrno(_ path: String) -> Int32 {
+        var info = stat()
+        return stat(path, &info) == 0 ? 0 : errno
     }
 
     /// Detects git worktrees either by path convention or by finding a `.git` file (worktree pointer) walking upward.
@@ -146,5 +181,22 @@ extension XcodeStorage {
             return "Missing: \(shortened)"
         }
         return shortened
+    }
+}
+
+/// Whether a DerivedData folder's recorded workspace is still on disk.
+private enum WorkspacePresence: Equatable, Sendable {
+    case present
+    /// Provably gone: its parent folder is readable and doesn't contain it.
+    case missing
+    /// Couldn't be checked, such as a denied folder or an unmounted volume.
+    case unreachable
+
+    var label: String {
+        switch self {
+        case .present: "Yes"
+        case .missing: "No (Deleted or Moved)"
+        case .unreachable: "Unknown (Not Accessible)"
+        }
     }
 }

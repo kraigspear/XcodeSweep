@@ -273,4 +273,51 @@ struct XcodeStorageScanTests {
         #expect(snapshot.itemsByCategory[.simulatorRuntimes] == [])
         #expect(snapshot.warnings.count == 2)
     }
+
+    @Test("Classifies DerivedData as orphaned only when its workspace is provably gone")
+    func unreachableWorkspaceIsNotOrphaned() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+
+        // A workspace inside a folder this user can't search, as with a TCC denial.
+        let lockedFolder = fixture.rootURL.appendingPathComponent("Locked", isDirectory: true)
+        let lockedWorkspace = lockedFolder.appendingPathComponent("Locked.xcodeproj")
+        try FileManager.default.createDirectory(at: lockedWorkspace, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: lockedFolder.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lockedFolder.path) }
+
+        try fixture.addDerivedData(
+            folderName: "Locked-1",
+            workspacePath: lockedWorkspace.path,
+            lastAccessed: now
+        )
+        try fixture.addDerivedData(
+            folderName: "Unmounted-2",
+            workspacePath: "/Volumes/XcodeSweep-Unmounted-\(UUID().uuidString)/Unmounted.xcodeproj",
+            lastAccessed: now
+        )
+        try fixture.addDerivedData(
+            folderName: "Gone-3",
+            workspacePath: fixture.rootURL.appendingPathComponent("Deleted/Gone.xcodeproj").path,
+            lastAccessed: now
+        )
+
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let byName = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.derivedData]).map { ($0.name, $0) }
+        )
+
+        #expect(byName["Locked"]?.status == .active)
+        #expect(byName["Unmounted"]?.status == .active)
+        #expect(byName["Gone"]?.status == .orphaned)
+        #expect(byName["Locked"]?.isReclaimable == false)
+        #expect(byName["Unmounted"]?.isReclaimable == false)
+    }
 }
