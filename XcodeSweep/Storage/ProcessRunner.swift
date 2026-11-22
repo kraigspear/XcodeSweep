@@ -5,8 +5,9 @@ import os
 protocol CommandRunning: Sendable {
     /// Runs `executableURL` with `arguments` to completion and returns its output.
     ///
-    /// - Throws: An implementation-specific error when the command can't run or fails.
-    func run(executableURL: URL, arguments: [String]) async throws -> CommandOutput
+    /// - Parameter timeout: Maximum time the command may run before it is aborted, or `nil` for no limit.
+    /// - Throws: An implementation-specific error when the command can't run, times out, or fails.
+    func run(executableURL: URL, arguments: [String], timeout: Duration?) async throws -> CommandOutput
 }
 
 /// Captured output and exit status of a finished command.
@@ -24,10 +25,11 @@ struct CommandOutput: Equatable, Sendable {
     }
 }
 
-/// A command that couldn't launch or exited with a nonzero status.
+/// A command that couldn't launch, timed out, or exited with a nonzero status.
 enum ProcessRunnerError: LocalizedError, Sendable {
     case launchFailed(command: String, underlying: String)
     case nonZeroExit(command: String, status: Int32, stderr: String)
+    case timedOut(command: String, timeout: Duration)
 
     var errorDescription: String? {
         switch self {
@@ -39,46 +41,66 @@ enum ProcessRunnerError: LocalizedError, Sendable {
                 return "\(command) exited with status \(status)."
             }
             return "\(command) exited with status \(status): \(details)"
+        case let .timedOut(command, timeout):
+            let duration = timeout.formatted(.units(allowed: [.seconds, .milliseconds], width: .abbreviated))
+            return "\(command) timed out after \(duration)."
         }
     }
 }
 
 /// Async wrapper around `Process` that collects stdout and stderr through readability callbacks.
 ///
-/// Callbacks keep cooperative threads free while a command runs. On Swift task cancellation the
-/// runner sends the child SIGTERM, discards its output, and throws `CancellationError` right away;
-/// it does not wait for the child or a descendant holding a pipe to exit. The pipes close at their
-/// next activity or when the direct child exits, whichever comes first.
+/// Callbacks keep cooperative threads free while a command runs. On Swift task cancellation or
+/// timeout the runner sends the child SIGTERM, discards its output, and throws `CancellationError`
+/// or `ProcessRunnerError.timedOut` right away; it does not wait for the child or a descendant
+/// holding a pipe to exit. The pipes close at their next activity or when the direct child exits,
+/// whichever comes first.
 struct ProcessRunner: CommandRunning, Sendable {
-    /// - Throws: `ProcessRunnerError` when launch fails or the exit status is nonzero, or
-    ///   `CancellationError` when the task is cancelled.
-    func run(executableURL: URL, arguments: [String]) async throws -> CommandOutput {
+    /// - Throws: `ProcessRunnerError` when launch fails, the command times out, or the exit status
+    ///   is nonzero; or `CancellationError` when the task is cancelled.
+    func run(executableURL: URL, arguments: [String], timeout: Duration? = nil) async throws -> CommandOutput {
+        try Task.checkCancellation()
+
         let run = Run(
             executableURL: executableURL,
             arguments: arguments
         )
+        let timeoutTask: Task<Void, Never>? = timeout.map { limit in
+            Task {
+                try? await Task.sleep(for: limit)
+                guard !Task.isCancelled else { return }
+                run.timeOut(after: limit)
+            }
+        }
+        defer { timeoutTask?.cancel() }
+
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 run.start(continuation)
             }
         } onCancel: {
+            timeoutTask?.cancel()
             run.cancel()
         }
     }
 }
 
 /// One command execution. The lock decides which path resumes the caller, exactly once: `start`
-/// resumes directly when the task was already cancelled or launch fails; otherwise it stores the
-/// continuation, and cancellation or completion takes it under the lock.
+/// resumes directly when the run was already aborted or launch fails; otherwise it stores the
+/// continuation, and cancellation, timeout, or completion takes it under the lock.
 private final class Run: Sendable {
     private struct State {
         var continuation: CheckedContinuation<CommandOutput, any Error>?
-        var isCancelled = false
+        var abortError: (any Error)?
         var stdout = Data()
         var stderr = Data()
         var stdoutClosed = false
         var stderrClosed = false
         var exited = false
+
+        var isAborted: Bool {
+            abortError != nil
+        }
     }
 
     private let process = Process()
@@ -96,10 +118,10 @@ private final class Run: Sendable {
     }
 
     func start(_ continuation: CheckedContinuation<CommandOutput, any Error>) {
-        // The lock orders launch against `cancel`: a cancelled run never launches.
+        // The lock orders launch against `cancel` and `timeOut`: an aborted run never launches.
         let launchError: (any Error)? = state.withLockUnchecked { state in
-            if state.isCancelled {
-                return CancellationError()
+            if let abortError = state.abortError {
+                return abortError
             }
             state.continuation = continuation
             installHandlers()
@@ -121,21 +143,32 @@ private final class Run: Sendable {
     }
 
     func cancel() {
-        let (continuation, hasExited) = state.withLockUnchecked { state in
-            state.isCancelled = true
-            state.stdout = Data()
-            state.stderr = Data()
-            return (state.continuation.take(), state.exited)
-        }
+        abort(with: CancellationError())
+    }
+
+    func timeOut(after timeout: Duration) {
+        abort(with: ProcessRunnerError.timedOut(command: commandDescription, timeout: timeout))
+    }
+
+    private func abort(with error: any Error) {
+        let action: (continuation: CheckedContinuation<CommandOutput, any Error>?, hasExited: Bool)? =
+            state.withLockUnchecked { state in
+                guard !state.isAborted else { return nil }
+                state.abortError = error
+                state.stdout = Data()
+                state.stderr = Data()
+                return (state.continuation.take(), state.exited)
+            }
+        guard let (continuation, hasExited) = action else { return }
         if hasExited {
             releasePipesHeldByDescendants()
         }
-        // The read handlers stay installed: their next callback sees the cancellation and closes
+        // The read handlers stay installed: their next callback sees the abort and closes
         // its pipe, whether or not the child exits.
         if process.isRunning {
             process.terminate()
         }
-        continuation?.resume(throwing: CancellationError())
+        continuation?.resume(throwing: error)
     }
 
     private func installHandlers() {
@@ -146,18 +179,18 @@ private final class Run: Sendable {
             receive(from: handle, isStdout: false)
         }
         process.terminationHandler = { [self] _ in
-            let isCancelled = state.withLockUnchecked { state in
+            let isAborted = state.withLockUnchecked { state in
                 state.exited = true
-                return state.isCancelled
+                return state.isAborted
             }
-            if isCancelled {
+            if isAborted {
                 releasePipesHeldByDescendants()
             }
             finishIfComplete()
         }
     }
 
-    /// Once the run is both cancelled and exited, whichever happens second calls this: a silent
+    /// Once the run is both aborted and exited, whichever happens second calls this: a silent
     /// descendant may hold the pipes open with no further callbacks, so dropping the handlers is
     /// what releases this run, and with it the read ends.
     private func releasePipesHeldByDescendants() {
@@ -174,8 +207,8 @@ private final class Run: Sendable {
 
     /// Runs on the handle's own callback queue, so closing the handle here cannot race a read.
     private func receive(from handle: FileHandle, isStdout: Bool) {
-        if state.withLockUnchecked({ $0.isCancelled }) {
-            // Closing the read end makes a writer that outlived cancellation get SIGPIPE.
+        if state.withLockUnchecked({ $0.isAborted }) {
+            // Closing the read end makes a writer that outlived cancellation or timeout get SIGPIPE.
             handle.readabilityHandler = nil
             try? handle.close()
             return
@@ -200,7 +233,7 @@ private final class Run: Sendable {
             CheckedContinuation<CommandOutput, any Error>,
             CommandOutput
         )? in
-            guard state.exited, state.stdoutClosed, state.stderrClosed,
+            guard !state.isAborted, state.exited, state.stdoutClosed, state.stderrClosed,
                   let continuation = state.continuation.take()
             else { return nil }
             return (continuation, CommandOutput(

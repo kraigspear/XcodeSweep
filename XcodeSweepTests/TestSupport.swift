@@ -174,7 +174,7 @@ struct StubCommandRunner: CommandRunning, Sendable {
     var devicesError: (any Error)?
     var runtimesError: (any Error)?
 
-    func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
         switch arguments {
         case ["simctl", "list", "devices", "-j"]:
             if let devicesError {
@@ -193,6 +193,25 @@ struct StubCommandRunner: CommandRunning, Sendable {
 }
 
 typealias ControllableCommandRunner = ParkedCalls<[String], CommandOutput>
+
+actor RecordingCommandRunner: CommandRunning {
+    struct Call: Equatable, Sendable {
+        let arguments: [String]
+        let timeout: Duration?
+    }
+
+    private(set) var calls: [Call] = []
+    private let stub: StubCommandRunner
+
+    init(stub: StubCommandRunner = StubCommandRunner()) {
+        self.stub = stub
+    }
+
+    func run(executableURL: URL, arguments: [String], timeout: Duration?) async throws -> CommandOutput {
+        calls.append(Call(arguments: arguments, timeout: timeout))
+        return try await stub.run(executableURL: executableURL, arguments: arguments, timeout: timeout)
+    }
+}
 
 // MARK: - FileTrashing Test Adapters
 
@@ -371,7 +390,7 @@ actor ParkedCalls<Argument: Sendable, Output: Sendable> {
 }
 
 extension ParkedCalls: CommandRunning where Argument == [String], Output == CommandOutput {
-    func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
         try await park(arguments)
     }
 }

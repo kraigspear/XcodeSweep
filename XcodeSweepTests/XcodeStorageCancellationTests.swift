@@ -326,7 +326,7 @@ private actor IgnoreCancelShutdownRunner: CommandRunning {
     private let started = AsyncSignal()
     private let release = AsyncSignal()
 
-    func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
         recordedArguments.append(arguments)
         await started.signal()
         await release.wait()
@@ -357,7 +357,7 @@ private actor GatedCleanupCommandRunner: CommandRunning {
         self.timeline = timeline
     }
 
-    func run(executableURL _: URL, arguments _: [String]) async throws -> CommandOutput {
+    func run(executableURL _: URL, arguments _: [String], timeout _: Duration?) async throws -> CommandOutput {
         let callID = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in

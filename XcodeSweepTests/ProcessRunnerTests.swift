@@ -260,6 +260,71 @@ struct ProcessRunnerTests {
         #expect(sizes.count == commandCount)
         #expect(sizes.allSatisfy { $0 == (byteCount, byteCount) })
     }
+
+    @Test(
+        "Terminates a hung child and throws timedOut when the command exceeds its timeout",
+        .timeLimit(.minutes(1))
+    )
+    func terminatesHungChildOnTimeout() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+
+        let task = Task {
+            try await ProcessRunner().run(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "\(PIDMarker.publishOwnPID); exec sleep 30", marker.path],
+                timeout: .milliseconds(250)
+            )
+        }
+        defer { task.cancel() }
+
+        let pid = try await marker.waitForPID()
+        defer { kill(pid, SIGKILL) }
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected ProcessRunnerError.timedOut")
+        } catch let ProcessRunnerError.timedOut(command, timeout) {
+            #expect(command.contains("sh"))
+            #expect(timeout == .milliseconds(250))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        try await waitUntil("timed-out child process exited") { kill(pid, 0) != 0 }
+    }
+
+    @Test(
+        "Closes pipes on timeout so a SIGTERM-immune grandchild still writing exits on SIGPIPE",
+        .timeLimit(.minutes(1))
+    )
+    func closesPipesWhenGrandchildOutlivesTimeout() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+
+        let task = Task {
+            try await ProcessRunner().run(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", PIDMarker.spawnTermImmuneGrandchild(running: "yes"), marker.path],
+                timeout: .milliseconds(250)
+            )
+        }
+        defer { task.cancel() }
+
+        let grandchildPID = try await marker.waitForPID()
+        defer { kill(grandchildPID, SIGKILL) }
+
+        do {
+            _ = try await task.value
+            Issue.record("Expected ProcessRunnerError.timedOut")
+        } catch ProcessRunnerError.timedOut {
+            // Expected
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+
+        try await waitUntil("grandchild writer exited on SIGPIPE") { kill(grandchildPID, 0) != 0 }
+    }
 }
 
 // MARK: - Helpers
