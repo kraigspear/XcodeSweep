@@ -1,6 +1,9 @@
 import Foundation
 
-/// Calculates APFS-accurate allocated disk usage for files and directories.
+/// Sums the allocated disk usage of files and directories.
+///
+/// APFS clones and hard links are counted once per reference, so a total can exceed the space
+/// that deleting the folder frees.
 enum DirectorySizer {
     private static let resourceKeys: Set<URLResourceKey> = [
         .isRegularFileKey,
