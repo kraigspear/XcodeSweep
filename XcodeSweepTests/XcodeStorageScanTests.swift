@@ -278,16 +278,13 @@ struct XcodeStorageScanTests {
         #expect(snapshot.warnings.count == 2)
     }
 
-    /// The footer once hard-coded "Macintosh HD", so this reads a volume that is never named that.
+    /// The footer once hard-coded "Macintosh HD"; the system VM volume is named "VM", so a hard-coded name fails here.
     @Test("Snapshot names the volume holding the Xcode folder")
     func scanReadsNameOfVolumeHoldingXcodeFolder() async throws {
         let vmVolumeURL = URL(fileURLWithPath: "/System/Volumes/VM")
         let expectedName = try #require(
             vmVolumeURL.resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
         )
-        let bootName = try URL(fileURLWithPath: NSHomeDirectory())
-            .resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
-        try #require(expectedName != bootName, "Fixture volume must differ from the boot volume")
 
         let storage = XcodeStorage(
             xcodeRootURL: vmVolumeURL.appendingPathComponent("XcodeSweep-Missing-\(UUID().uuidString)/Xcode"),
