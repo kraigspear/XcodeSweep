@@ -20,20 +20,20 @@ extension XcodeStorage {
         }
 
         return await Self.scanConcurrently(candidates) { folderURL in
-            Self.inspectDerivedDataFolder(at: folderURL, now: now)
+            try Self.inspectDerivedDataFolder(at: folderURL, now: now)
         }
     }
 
     // MARK: - Private Inspection
 
-    private static func inspectDerivedDataFolder(at folderURL: URL, now: Date) -> StorageItem {
+    private static func inspectDerivedDataFolder(at folderURL: URL, now: Date) throws(CancellationError) -> StorageItem {
         let fileManager = FileManager.default
         let folderName = folderURL.lastPathComponent
         let plist = loadPlist(at: folderURL.appendingPathComponent("info.plist"))
 
         let workspacePath = plist?["WorkspacePath"] as? String
         let lastAccessed = (plist?["LastAccessedDate"] as? Date) ?? modificationDate(of: folderURL)
-        let sizeBytes = DirectorySizer.allocatedSize(of: folderURL)
+        let sizeBytes = try DirectorySizer.allocatedSize(of: folderURL)
 
         let status = classifyDerivedDataStatus(
             workspacePath: workspacePath,

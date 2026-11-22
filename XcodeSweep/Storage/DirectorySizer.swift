@@ -14,7 +14,10 @@ enum DirectorySizer {
     /// Returns the total allocated bytes on disk for `url` (file or directory).
     ///
     /// Does not follow symbolic links into external directories.
-    static func allocatedSize(of url: URL) -> Int64 {
+    ///
+    /// - Throws: `CancellationError` if the task is cancelled mid-walk, so a partial walk is never
+    ///   mistaken for a small or empty folder.
+    static func allocatedSize(of url: URL) throws(CancellationError) -> Int64 {
         let fileManager = FileManager.default
 
         if let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
@@ -43,6 +46,9 @@ enum DirectorySizer {
 
         var total: Int64 = 0
         for case let fileURL as URL in enumerator {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
             guard let values = try? fileURL.resourceValues(forKeys: resourceKeys) else {
                 continue
             }
