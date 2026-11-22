@@ -1,6 +1,10 @@
 import Foundation
 
-/// Calculates APFS-accurate allocated disk usage for files and directories.
+/// Estimates the disk usage of files and directories.
+///
+/// Each file counts its allocated size, or its logical size when no allocated size is reported.
+/// APFS clones and hard links are counted once per reference, so a total can exceed the space
+/// that deleting the folder frees.
 enum DirectorySizer {
     private static let resourceKeys: Set<URLResourceKey> = [
         .isRegularFileKey,
@@ -11,7 +15,7 @@ enum DirectorySizer {
         .fileSizeKey,
     ]
 
-    /// Returns the total allocated bytes on disk for `url` (file or directory).
+    /// Returns the estimated bytes used by `url` (file or directory), as described on the type.
     ///
     /// Does not follow symbolic links into external directories.
     static func allocatedSize(of url: URL) -> Int64 {
