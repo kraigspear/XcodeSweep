@@ -278,14 +278,18 @@ struct ProcessRunnerTests {
         }
     }
 
-    /// The time limit is the assertion: a runner that waited out its two-minute deadline would exceed it.
     @Test("Returns output without waiting out an armed timeout", .timeLimit(.minutes(1)))
     func returnsOutputBeforeArmedTimeout() async throws {
-        let output = try await ProcessRunner().run(
-            executableURL: URL(fileURLWithPath: "/bin/echo"),
-            arguments: ["done"],
-            timeout: .seconds(120)
-        )
+        let task = Task {
+            try await ProcessRunner().run(
+                executableURL: URL(fileURLWithPath: "/bin/echo"),
+                arguments: ["done"],
+                timeout: .seconds(120)
+            )
+        }
+        defer { task.cancel() }
+
+        let output = try await awaitResult(of: task, within: .seconds(10)).get()
         #expect(output.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) == "done")
     }
 
@@ -325,7 +329,8 @@ struct ProcessRunnerTests {
 
         run.timeOut(after: .seconds(1))
 
-        await #expect(throws: ProcessRunnerError.self) { try await task.value }
+        let result = try await awaitResult(of: task, within: .seconds(10))
+        #expect(throws: ProcessRunnerError.self) { try result.get() }
         try await waitUntil("timed-out child process exited") { kill(pid, 0) != 0 }
     }
 
@@ -347,7 +352,8 @@ struct ProcessRunnerTests {
 
         run.timeOut(after: .seconds(1))
 
-        await #expect(throws: ProcessRunnerError.self) { try await task.value }
+        let result = try await awaitResult(of: task, within: .seconds(10))
+        #expect(throws: ProcessRunnerError.self) { try result.get() }
         try await waitUntil("grandchild writer exited on SIGPIPE") { kill(grandchildPID, 0) != 0 }
     }
 
@@ -366,7 +372,7 @@ struct ProcessRunnerTests {
         } else {
             run.cancel()
         }
-        let result = await startTask(run).result
+        let result = try await awaitResult(of: startTask(run), within: .seconds(10))
 
         if byTimeout {
             #expect(throws: ProcessRunnerError.self) { try result.get() }
@@ -400,7 +406,7 @@ struct ProcessRunnerTests {
             run.cancel()
             run.timeOut(after: .seconds(1))
         }
-        let result = await task.result
+        let result = try await awaitResult(of: task, within: .seconds(10))
 
         if timeoutFirst {
             #expect(throws: ProcessRunnerError.self) { try result.get() }

@@ -450,22 +450,33 @@ func cancelAndAwaitResult<Success: Sendable>(
     of task: Task<Success, any Error>,
     within timeout: Duration
 ) async throws -> Result<Success, any Error> {
+    task.cancel()
+    return try await awaitResult(of: task, within: timeout, waitingFor: "cancelled task finished")
+}
+
+/// The task's result, or `ConditionTimeoutError` if it doesn't finish within `timeout`.
+///
+/// Waits on a detached observer, so a task that never resumes fails the test instead of hanging it.
+func awaitResult<Success: Sendable>(
+    of task: Task<Success, any Error>,
+    within timeout: Duration,
+    waitingFor description: String = "task finished"
+) async throws -> Result<Success, any Error> {
     let deadline = ContinuousClock.now + timeout
     let outcome = OSAllocatedUnfairLock<(result: Result<Success, any Error>, finishedAt: ContinuousClock.Instant)?>(
         initialState: nil
     )
     Task.detached {
-        task.cancel()
         let result = await task.result
         let finishedAt = ContinuousClock.now
         outcome.withLock { $0 = (result, finishedAt) }
     }
-    try await waitUntil("cancelled task finished", timeout: deadline - ContinuousClock.now) {
+    try await waitUntil(description, timeout: deadline - ContinuousClock.now) {
         outcome.withLock { $0 != nil }
     }
     let finished = try #require(outcome.withLock { $0 })
     guard finished.finishedAt <= deadline else {
-        throw ConditionTimeoutError(description: "Cancelled task finished after its deadline")
+        throw ConditionTimeoutError(description: "Task finished after its deadline")
     }
     return finished.result
 }
