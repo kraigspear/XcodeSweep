@@ -3,8 +3,8 @@ import Foundation
 /// The items a deletion will remove, and the text every deletion control shows for them.
 ///
 /// Pass the raw selection: protected items are counted in `protectedCount` and never deleted.
-/// Plans for the same selection are equal; identity is the contents, so SwiftUI sees no change
-/// when an unchanged selection mints a new plan.
+/// Plans with the same deletable items in the same order and the same protected count are equal;
+/// identity is the contents, so SwiftUI sees no change when an unchanged selection mints a new plan.
 struct DeletionPlan: Identifiable, Hashable, Sendable {
     let deletableItems: [StorageItem]
     /// Selected items that can't be deleted.
