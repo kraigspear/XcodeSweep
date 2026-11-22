@@ -189,7 +189,11 @@ struct XcodeStorageScanTests {
         // Volume capacity and injected clock timestamp should be populated on the snapshot.
         #expect(snapshot.scannedAt == referenceNow)
         #expect(snapshot.warnings.isEmpty)
-        #expect((snapshot.diskTotalBytes ?? 0) > 0)
+        let expectedVolumeName = try fixture.xcodeRootURL
+            .resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName
+        let volume = try #require(snapshot.volume)
+        #expect(volume.name == expectedVolumeName)
+        #expect(volume.totalBytes > 0)
 
         // DerivedData: 4 folders (ModuleCache.noindex excluded)
         let derived = try #require(snapshot.itemsByCategory[.derivedData])
