@@ -13,8 +13,8 @@ The scanned items in every category together with the totals derived from them. 
 _Avoid_: ScanSummary, summary
 
 **Reclaimable**:
-An item that is deletable and whose status (orphaned, unavailable, or unused) is recommended for cleanup. The UI labels this "Recommended".
-_Avoid_: recommended, cleanup candidate (in code)
+An item that is deletable and has a reclaimable status: orphaned, unavailable, or unused. The UI labels this "Recommended".
+_Avoid_: recommended, cleanup candidate (in code; "Recommended" is UI text only)
 
 **Protected**:
 A selected item that cannot be deleted, such as a system-managed simulator runtime. A deletion plan counts protected items but never deletes them.

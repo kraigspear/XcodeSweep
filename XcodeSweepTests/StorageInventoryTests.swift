@@ -6,7 +6,7 @@ import Testing
 struct StorageInventoryTests {
     private let scannedAt = testISO8601Date("2026-11-21T10:00:00Z")
 
-    /// Verifies Overview totals count only deletable, cleanup-recommended items as reclaimable.
+    /// Verifies Overview totals include every item, and reclaimable totals only reclaimable items.
     /// To replicate: scan with an orphaned DerivedData folder, an active one, and a protected runtime → read the
     /// Overview cards.
     @Test("Totals and category metrics derive from items")
@@ -144,9 +144,9 @@ struct StorageInventoryTests {
 
     /// Verifies the Overview's Recommended Cleanup card names exactly the statuses that count as reclaimable.
     /// To replicate: open Overview → read the Recommended Cleanup footnote.
-    @Test("Cleanup summary lists recommended statuses")
-    func cleanupRecommendationSummary_listsRecommendedStatuses() {
-        #expect(ItemStatus.cleanupRecommendationSummary == "orphaned, unavailable, or unused")
+    @Test("Cleanup summary lists reclaimable statuses")
+    func reclaimableStatusSummary_listsReclaimableStatuses() {
+        #expect(ItemStatus.reclaimableStatusSummary == "orphaned, unavailable, or unused")
     }
 
     private func makeInventory(_ items: [StorageItem]) -> StorageInventory {

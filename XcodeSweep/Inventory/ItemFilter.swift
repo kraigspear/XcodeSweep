@@ -41,7 +41,7 @@ enum ItemFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
         case .all:
             true
         case .reclaimable:
-            item.isReclaimableCandidate
+            item.isReclaimable
         case .orphaned, .worktree, .unavailable, .stale:
             item.status == status
         }
