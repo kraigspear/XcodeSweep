@@ -5,7 +5,8 @@ import os
 protocol CommandRunning: Sendable {
     /// Runs `executableURL` with `arguments` to completion and returns its output.
     ///
-    /// - Parameter timeout: Maximum time the command may run before it is aborted, or `nil` for no limit.
+    /// - Parameter timeout: How long to wait before giving up on the command, or `nil` to wait until it
+    ///   finishes. On expiry the command is asked to stop; it may outlive the call.
     /// - Throws: An implementation-specific error when the command can't run, times out, or fails.
     func run(executableURL: URL, arguments: [String], timeout: Duration?) async throws -> CommandOutput
 }
@@ -61,15 +62,16 @@ struct ProcessRunner: CommandRunning, Sendable {
     func run(executableURL: URL, arguments: [String], timeout: Duration? = nil) async throws -> CommandOutput {
         try Task.checkCancellation()
 
-        let run = Run(
+        let run = ProcessRun(
             executableURL: executableURL,
             arguments: arguments
         )
+        // Weak, so a pending deadline never keeps a finished run alive.
         let timeoutTask: Task<Void, Never>? = timeout.map { limit in
-            Task {
+            Task { [weak run] in
                 try? await Task.sleep(for: limit)
                 guard !Task.isCancelled else { return }
-                run.timeOut(after: limit)
+                run?.timeOut(after: limit)
             }
         }
         defer { timeoutTask?.cancel() }
@@ -88,7 +90,7 @@ struct ProcessRunner: CommandRunning, Sendable {
 /// One command execution. The lock decides which path resumes the caller, exactly once: `start`
 /// resumes directly when the run was already aborted or launch fails; otherwise it stores the
 /// continuation, and cancellation, timeout, or completion takes it under the lock.
-private final class Run: Sendable {
+final class ProcessRun: Sendable {
     private struct State {
         var continuation: CheckedContinuation<CommandOutput, any Error>?
         var abortError: (any Error)?
