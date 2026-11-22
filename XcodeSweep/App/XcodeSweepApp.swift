@@ -5,7 +5,8 @@ struct XcodeSweepApp: App {
     @State private var xcodeSweepStore = XcodeSweepStore()
 
     var body: some Scene {
-        WindowGroup {
+        // One window: the store holds selection, search, and dialog state that a second window would share.
+        Window("XcodeSweep", id: "main") {
             ContentView(store: xcodeSweepStore)
         }
         .defaultSize(width: 1180, height: 760)
