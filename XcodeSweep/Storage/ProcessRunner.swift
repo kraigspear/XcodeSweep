@@ -53,10 +53,14 @@ enum ProcessRunnerError: LocalizedError, Sendable {
 ///
 /// Callbacks keep cooperative threads free while a command runs. On Swift task cancellation or
 /// timeout the runner sends the child SIGTERM, discards its output, and throws `CancellationError`
-/// or `ProcessRunnerError.timedOut` right away; it does not wait for the child or a descendant
-/// holding a pipe to exit. The pipes close at their next activity or when the direct child exits,
-/// whichever comes first.
+/// or `ProcessRunnerError.timedOut` once the child has exited, sending SIGKILL if it is still
+/// running after `terminationGrace`. Waiting for the exit keeps a stopped command from overlapping
+/// whatever the caller starts next. It does not wait for a descendant holding a pipe; the pipes
+/// close at their next activity or when the direct child exits, whichever comes first.
 struct ProcessRunner: CommandRunning, Sendable {
+    /// How long an aborted child may take to exit after SIGTERM before it gets SIGKILL.
+    var terminationGrace: Duration = .seconds(2)
+
     /// - Throws: `ProcessRunnerError` when launch fails, the command times out, or the exit status
     ///   is nonzero; or `CancellationError` when the task is cancelled.
     func run(executableURL: URL, arguments: [String], timeout: Duration? = nil) async throws -> CommandOutput {
@@ -64,7 +68,8 @@ struct ProcessRunner: CommandRunning, Sendable {
 
         let run = ProcessRun(
             executableURL: executableURL,
-            arguments: arguments
+            arguments: arguments,
+            terminationGrace: terminationGrace
         )
         // Weak, so a pending deadline never keeps a finished run alive.
         let timeoutTask: Task<Void, Never>? = timeout.map { limit in
@@ -89,7 +94,8 @@ struct ProcessRunner: CommandRunning, Sendable {
 
 /// One command execution. The lock decides which path resumes the caller, exactly once: `start`
 /// resumes directly when the run was already aborted or launch fails; otherwise it stores the
-/// continuation, and cancellation, timeout, or completion takes it under the lock.
+/// continuation. Completion takes it once the child exits and both pipes close; an abort takes it
+/// once the child exits, or at once if it already has.
 final class ProcessRun: Sendable {
     private struct State {
         var continuation: CheckedContinuation<CommandOutput, any Error>?
@@ -109,9 +115,11 @@ final class ProcessRun: Sendable {
     private let stdoutPipe = Pipe()
     private let stderrPipe = Pipe()
     private let commandDescription: String
+    private let terminationGrace: Duration
     private let state = OSAllocatedUnfairLock(uncheckedState: State())
 
-    init(executableURL: URL, arguments: [String]) {
+    init(executableURL: URL, arguments: [String], terminationGrace: Duration = .seconds(2)) {
+        self.terminationGrace = terminationGrace
         process.executableURL = executableURL
         process.arguments = arguments
         process.standardOutput = stdoutPipe
@@ -153,24 +161,37 @@ final class ProcessRun: Sendable {
     }
 
     private func abort(with error: any Error) {
+        // A child still running keeps the continuation; the termination handler resumes it.
         let action: (continuation: CheckedContinuation<CommandOutput, any Error>?, hasExited: Bool)? =
             state.withLockUnchecked { state in
                 guard !state.isAborted else { return nil }
                 state.abortError = error
                 state.stdout = Data()
                 state.stderr = Data()
-                return (state.continuation.take(), state.exited)
+                return (state.exited ? state.continuation.take() : nil, state.exited)
             }
         guard let (continuation, hasExited) = action else { return }
         if hasExited {
             releasePipesHeldByDescendants()
+            continuation?.resume(throwing: error)
+            return
         }
         // The read handlers stay installed: their next callback sees the abort and closes
         // its pipe, whether or not the child exits.
         if process.isRunning {
             process.terminate()
+            Task { [weak self, terminationGrace] in
+                try? await Task.sleep(for: terminationGrace)
+                self?.killIfStillRunning()
+            }
         }
-        continuation?.resume(throwing: error)
+    }
+
+    private func killIfStillRunning() {
+        let hasExited = state.withLockUnchecked { $0.exited }
+        if !hasExited, process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+        }
     }
 
     private func installHandlers() {
@@ -181,14 +202,20 @@ final class ProcessRun: Sendable {
             receive(from: handle, isStdout: false)
         }
         process.terminationHandler = { [self] _ in
-            let isAborted = state.withLockUnchecked { state in
+            let aborted = state.withLockUnchecked { state -> (
+                error: any Error,
+                continuation: CheckedContinuation<CommandOutput, any Error>?
+            )? in
                 state.exited = true
-                return state.isAborted
+                guard let abortError = state.abortError else { return nil }
+                return (abortError, state.continuation.take())
             }
-            if isAborted {
-                releasePipesHeldByDescendants()
+            guard let aborted else {
+                finishIfComplete()
+                return
             }
-            finishIfComplete()
+            releasePipesHeldByDescendants()
+            aborted.continuation?.resume(throwing: aborted.error)
         }
     }
 

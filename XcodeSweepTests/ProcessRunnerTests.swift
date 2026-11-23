@@ -86,7 +86,8 @@ struct ProcessRunnerTests {
 
         let result = try await cancelAndAwaitResult(of: task, within: .seconds(2))
         #expect(throws: CancellationError.self) { try result.get() }
-        try await waitUntil("child process exited") { kill(pid, 0) != 0 }
+        // The error arrives only after the child has exited.
+        #expect(kill(pid, 0) != 0)
     }
 
     @Test(
@@ -311,7 +312,8 @@ struct ProcessRunnerTests {
 
         let result = try await cancelAndAwaitResult(of: task, within: .seconds(2))
         #expect(throws: CancellationError.self) { try result.get() }
-        try await waitUntil("child process exited") { kill(pid, 0) != 0 }
+        // The error arrives only after the child has exited.
+        #expect(kill(pid, 0) != 0)
     }
 
     @Test("Terminates the child and throws timedOut when the deadline fires", .timeLimit(.minutes(1)))
@@ -331,7 +333,7 @@ struct ProcessRunnerTests {
 
         let result = try await awaitResult(of: task, within: .seconds(10))
         #expect(throws: ProcessRunnerError.self) { try result.get() }
-        try await waitUntil("timed-out child process exited") { kill(pid, 0) != 0 }
+        #expect(kill(pid, 0) != 0)
     }
 
     @Test(
@@ -355,6 +357,27 @@ struct ProcessRunnerTests {
         let result = try await awaitResult(of: task, within: .seconds(10))
         #expect(throws: ProcessRunnerError.self) { try result.get() }
         try await waitUntil("grandchild writer exited on SIGPIPE") { kill(grandchildPID, 0) != 0 }
+    }
+
+    @Test("Kills a child that ignores SIGTERM after the grace period, then throws", .timeLimit(.minutes(1)))
+    func killsChildThatIgnoresTermAfterGrace() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+
+        let task = Task {
+            try await ProcessRunner(terminationGrace: .milliseconds(300)).run(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "trap '' TERM; \(PIDMarker.publishOwnPID); exec sleep 30", marker.path]
+            )
+        }
+        defer { task.cancel() }
+        let pid = try await marker.waitForPID()
+        defer { kill(pid, SIGKILL) }
+
+        let result = try await cancelAndAwaitResult(of: task, within: .seconds(10))
+
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(kill(pid, 0) != 0)
     }
 
     @Test(
