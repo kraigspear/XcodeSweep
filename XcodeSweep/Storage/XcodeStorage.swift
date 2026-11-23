@@ -184,11 +184,6 @@ struct XcodeStorage: Sendable {
         }
     }
 
-    /// Whether `url` is a folder, following a symbolic link to one.
-    static func isFolder(_ url: URL) -> Bool {
-        (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-    }
-
     /// The dictionary in the property list at `url`; `nil` if unreadable or not a dictionary.
     static func loadPlist(at url: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: url),

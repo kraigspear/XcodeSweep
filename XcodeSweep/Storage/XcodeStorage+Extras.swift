@@ -168,11 +168,24 @@ extension XcodeStorage {
         let archivesURL = xcodeLocations.archivesURL
         var archiveURLs: [URL] = []
         do {
-            // Date folders may be symbolic links; follow them, and skip stray files.
-            for dateFolder in try Self.folderEntries(of: archivesURL) ?? [] where Self.isFolder(dateFolder) {
+            var visitedFolders: Set<FileIdentity> = []
+            for entry in try Self.folderEntries(of: archivesURL) ?? [] {
+                // `stat` follows a symbolic link, and, unlike Foundation, tells a target that is
+                // gone (skipped) from one that can't be reached (a failure).
+                var info = stat()
+                guard stat(entry.path, &info) == 0 else {
+                    if errno != ENOENT {
+                        failures.append("Couldn't read “\(entry.lastPathComponent)”: \(String(cString: strerror(errno)))")
+                    }
+                    continue
+                }
+                // A stray file isn't a date folder; a second link to one folder isn't a second folder.
+                guard info.st_mode & S_IFMT == S_IFDIR, visitedFolders.insert(FileIdentity(info)).inserted else {
+                    continue
+                }
                 do {
-                    let listedFolder = dateFolder.resolvingSymlinksInPath()
-                    for archive in try Self.folderEntries(of: listedFolder) ?? [] where archive.pathExtension == "xcarchive" {
+                    let folder = entry.resolvingSymlinksInPath()
+                    for archive in try Self.folderEntries(of: folder) ?? [] where archive.pathExtension == "xcarchive" {
                         archiveURLs.append(archive)
                     }
                 } catch {
@@ -293,6 +306,10 @@ private struct FileIdentity: Hashable {
     init?(of url: URL) {
         var info = stat()
         guard stat(url.path, &info) == 0 else { return nil }
+        self.init(info)
+    }
+
+    init(_ info: stat) {
         device = info.st_dev
         inode = info.st_ino
     }

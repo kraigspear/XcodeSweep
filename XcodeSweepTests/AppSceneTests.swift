@@ -66,20 +66,22 @@ struct AppSceneTests {
         #expect(card.contains { $0.contains("Scan incomplete") }, "Recognized: \(card)")
     }
 
-    /// A filter that hides every row must not hide why some rows may be missing.
-    @Test("A filtered category view still explains a failed scan")
-    func filteredCategoryShowsFailureBanner() throws {
-        let store = XcodeSweepStore.preview(
-            destination: .category(.deviceSupport),
-            scanFailures: [.deviceSupport: "Permission denied"]
-        )
-        store.searchText = "no such item"
+    #if DEBUG && canImport(SwiftUI)
+        /// A filter that hides every row must not hide why some rows may be missing.
+        @Test("A filtered category view still explains a failed scan")
+        func filteredCategoryShowsFailureBanner() throws {
+            let store = XcodeSweepStore.preview(
+                destination: .category(.deviceSupport),
+                scanFailures: [.deviceSupport: "Permission denied"]
+            )
+            store.searchText = "no such item"
 
-        let lines = try recognizedText(in: CategoryDetailView(category: .deviceSupport, store: store)
-            .frame(width: 700, height: 400))
+            let lines = try recognizedText(in: CategoryDetailView(category: .deviceSupport, store: store)
+                .frame(width: 700, height: 400))
 
-        #expect(lines.contains { $0.contains("fully scan Device Support") }, "Recognized: \(lines)")
-    }
+            #expect(lines.contains { $0.contains("fully scan Device Support") }, "Recognized: \(lines)")
+        }
+    #endif
 
     /// The alert lists only the first four failures; this list is where the rest are seen.
     /// To replicate: clean up six items where five or more fail → Show All Failures → scroll the list.

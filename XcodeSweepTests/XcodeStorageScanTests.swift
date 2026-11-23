@@ -708,7 +708,7 @@ struct XcodeStorageScanTests {
     }
 
     /// To replicate: replace an Archives date folder with a symbolic link to it → scan → its archives still appear.
-    @Test("Archives in a date folder reached through a symbolic link are listed")
+    @Test("Archives in a date folder reached through symbolic links are listed once")
     func linkedArchiveDateFolderIsScanned() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
@@ -725,8 +725,12 @@ struct XcodeStorageScanTests {
             at: archives.appendingPathComponent("2026-08-01"),
             withDestinationURL: archive.deletingLastPathComponent()
         )
-        // A stray file beside the date folders is skipped, not reported.
-        try Data().write(to: archives.appendingPathComponent(".DS_Store-like"))
+        // A second link to the same folder adds nothing, and a stray file is skipped, not reported.
+        try FileManager.default.createSymbolicLink(
+            at: archives.appendingPathComponent("Latest"),
+            withDestinationURL: archive.deletingLastPathComponent()
+        )
+        try Data().write(to: archives.appendingPathComponent("notes.txt"))
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -738,5 +742,36 @@ struct XcodeStorageScanTests {
 
         #expect(snapshot.itemsByCategory[.archivesAndCaches]?.map(\.name) == ["LinkedApp"])
         #expect(snapshot.failures.isEmpty)
+    }
+
+    /// A linked date folder whose target can't be reached must not look empty.
+    @Test("A linked archive folder that can't be reached is a failure, and its readable siblings still count")
+    func unreachableLinkedArchiveFolderIsFailure() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        try fixture.addArchive(
+            dateFolder: "2026-08-01", archiveName: "Readable 8-1-26", appName: "ReadableApp",
+            shortVersion: "1.0", buildVersion: "1", bundleID: "com.example.readable", creationDate: now
+        )
+        let locked = fixture.rootURL.appendingPathComponent("Locked", isDirectory: true)
+        try FileManager.default.createDirectory(at: locked.appendingPathComponent("2026-09-01"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: fixture.xcodeRootURL.appendingPathComponent("Archives/2026-09-01"),
+            withDestinationURL: locked.appendingPathComponent("2026-09-01")
+        )
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.failures[.archivesAndCaches]?.contains("2026-09-01") == true)
+        #expect(snapshot.itemsByCategory[.archivesAndCaches]?.map(\.name) == ["ReadableApp"])
     }
 }
