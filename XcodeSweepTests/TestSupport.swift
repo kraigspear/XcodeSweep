@@ -227,35 +227,36 @@ struct TestTrashError: LocalizedError, Sendable {
     }
 }
 
+/// Records each move; with `removingUnder`, also removes items inside that folder as the Trash would.
 actor RecordingFileTrasher: FileTrashing {
     private(set) var trashedURLs: [URL] = []
     private let failingPaths: Set<String>
+    private let removalRoot: URL?
 
-    init(failingURLs: [URL] = []) {
+    init(failingURLs: [URL] = [], removingUnder removalRoot: URL? = nil) {
         failingPaths = Set(failingURLs.map(\.path))
+        self.removalRoot = removalRoot
     }
 
     func trashItem(at url: URL) async throws {
         if failingPaths.contains(url.path) {
             throw TestTrashError(message: "Permission denied for \(url.lastPathComponent)")
         }
-        try removeIfFixtureItem(url)
+        try removeItem(url, ifInside: removalRoot)
         trashedURLs.append(url)
     }
 }
 
 typealias ControllableFileTrasher = ParkedCalls<URL, Void>
 
-/// Removes `url` as the Trash would, so a rescan sees what a real deletion leaves, but only
-/// inside a `TempXcodeFixture`; synthetic paths such as `/tmp/sample` are just recorded.
-func removeIfFixtureItem(_ url: URL) throws {
-    let fixturesRoot = FileManager.default.temporaryDirectory
-        .resolvingSymlinksInPath().standardizedFileURL.path
+/// Removes `url` as the Trash would, so a rescan sees what a real deletion leaves, but only when
+/// it is inside `root`, the test's own fixture. Without a root, or outside it, nothing is touched.
+func removeItem(_ url: URL, ifInside root: URL?) throws {
+    guard let root else { return }
+    let rootPath = root.resolvingSymlinksInPath().standardizedFileURL.path
     let path = url.resolvingSymlinksInPath().standardizedFileURL.path
-    guard path.hasPrefix(fixturesRoot + "/XcodeSweepTests-"),
-          FileManager.default.fileExists(atPath: url.path)
-    else { return }
-    try FileManager.default.removeItem(at: url)
+    guard path.hasPrefix(rootPath + "/"), FileManager.default.fileExists(atPath: path) else { return }
+    try FileManager.default.removeItem(atPath: path)
 }
 
 // MARK: - Parked Calls
@@ -292,6 +293,12 @@ actor ParkedCalls<Argument: Sendable, Output: Sendable> {
     private var waiters: [(id: UUID, continuation: CheckedContinuation<ParkedCall<Argument>, any Error>)] = []
     private var cancelledCallIDs: Set<UUID> = []
     private var cancellationWaiters: [UUID: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)]] = [:]
+    /// As a file trasher, removes trashed items inside this folder; see `removeItem(_:ifInside:)`.
+    let removalRoot: URL?
+
+    init(removingUnder removalRoot: URL? = nil) {
+        self.removalRoot = removalRoot
+    }
 
     var hasParkedCall: Bool {
         !inFlightCalls.isEmpty
@@ -419,7 +426,7 @@ extension ParkedCalls: FileTrashing where Argument == URL, Output == Void {
 
     func trashItem(at url: URL) async throws {
         try await park(url)
-        try removeIfFixtureItem(url)
+        try removeItem(url, ifInside: removalRoot)
     }
 
     func resume(id: UUID) {

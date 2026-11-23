@@ -109,7 +109,7 @@ struct DeletionReport: Identifiable, Hashable, Sendable {
     let reclaimedBytes: Int64
     let failures: [DeletionFailure]
     /// The user stopped the run. The counts and failures are the acknowledged outcomes; an item in
-    /// flight at the stop may still have been removed, which the rescan that follows shows.
+    /// flight at the stop may still have been removed.
     let wasCancelled: Bool
 
     init(

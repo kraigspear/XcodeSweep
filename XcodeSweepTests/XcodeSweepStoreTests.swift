@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import XcodeSweep
 
@@ -43,7 +44,7 @@ struct XcodeSweepStoreTests {
         }
         """
 
-        let trasher = RecordingFileTrasher()
+        let trasher = RecordingFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(devicesJSON: devicesJSON),
@@ -113,7 +114,7 @@ struct XcodeSweepStoreTests {
             payloadBytes: 16384
         )
 
-        let trasher = RecordingFileTrasher(failingURLs: [secondURL])
+        let trasher = RecordingFileTrasher(failingURLs: [secondURL], removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -166,7 +167,7 @@ struct XcodeSweepStoreTests {
             payloadBytes: 65536
         )
 
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -250,7 +251,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
@@ -280,7 +281,7 @@ struct XcodeSweepStoreTests {
         defer { fixture.cleanup() }
 
         let controller = ControllableCommandRunner()
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
@@ -418,7 +419,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
         try fixture.addDerivedData(
@@ -496,7 +497,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
@@ -539,7 +540,7 @@ struct XcodeSweepStoreTests {
             lastAccessed: now
         )
 
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -637,7 +638,7 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         ))
         let target = makeStorageItem(id: "dd", method: .trashFile(fixture.rootURL.appendingPathComponent("dd")))
 
@@ -668,7 +669,7 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         ))
         let device = makeStorageItem(
             id: "sim",
@@ -711,7 +712,7 @@ struct XcodeSweepStoreTests {
             let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
                 xcodeRootURL: fixture.xcodeRootURL,
                 commandRunner: runner,
-                fileTrasher: RecordingFileTrasher()
+                fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
             ))
             weakStore = store
             // The task can't start until this test suspends, so the store goes first.
@@ -740,7 +741,7 @@ struct XcodeSweepStoreTests {
             let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
                 xcodeRootURL: fixture.xcodeRootURL,
                 commandRunner: runner,
-                fileTrasher: RecordingFileTrasher()
+                fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
             ))
             weakStore = store
             task = operation.start(on: store)
@@ -768,7 +769,7 @@ struct XcodeSweepStoreTests {
         let now = testISO8601Date("2026-11-21T10:00:00Z")
         let failingURL = try fixture.addDerivedData(folderName: "Fails-1", workspacePath: "/nonexistent/Fails.xcodeproj", lastAccessed: now)
         let parkedURL = try fixture.addDerivedData(folderName: "Parked-2", workspacePath: "/nonexistent/Parked.xcodeproj", lastAccessed: now)
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -809,7 +810,7 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         ))
         await store.startRefresh()?.value
         let device = try #require(store.inventory.items(in: .simulatorDevices).first)
@@ -839,7 +840,7 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher(),
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL),
             now: { now }
         ))
         let initialScan = store.startRefresh()
@@ -848,11 +849,18 @@ struct XcodeSweepStoreTests {
         let gone = try #require(store.inventory.items(in: .derivedData).first { $0.path == goneURL })
 
         // Given: the deletion finished and its rescan is parked on simctl
+        let history = OperationHistory(store)
         let deletion = store.startDeletion(DeletionPlan(selection: [gone]))
         let call1 = try await controller.nextPendingCall()
         let call2 = try await controller.nextPendingCall()
         #expect(store.operation.isScanning)
         #expect(store.lastDeletionReport?.deletedCount == 1)
+
+        // The store went from deleting to scanning without passing through idle.
+        let values = history.values + [store.operation]
+        let deletingAt = try #require(values.firstIndex { $0.isDeleting })
+        let scanningAt = try #require(values[deletingAt...].firstIndex { $0.isScanning })
+        #expect(!values[deletingAt ..< scanningAt].contains(.idle), "Operation history: \(values)")
 
         // When
         store.cancelOperation()
@@ -885,7 +893,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
-            fileTrasher: RecordingFileTrasher(),
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL),
             now: { now }
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
@@ -958,6 +966,31 @@ private actor DeleteTakesEffectThenParksRunner: CommandRunning {
             throw CancellationError()
         default:
             return CommandOutput(stdout: Data(#"{}"#.utf8), stderr: Data(), terminationStatus: 0)
+        }
+    }
+}
+
+/// Every value `store.operation` held, in order. Observation calls back just before each write,
+/// so reading the property there captures the value being replaced, even one held for no time.
+@MainActor
+private final class OperationHistory {
+    private(set) var values: [OperationState] = []
+    private let store: XcodeSweepStore
+
+    init(_ store: XcodeSweepStore) {
+        self.store = store
+        track()
+    }
+
+    private func track() {
+        withObservationTracking {
+            _ = self.store.operation
+        } onChange: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.values.append(self.store.operation)
+                self.track()
+            }
         }
     }
 }
