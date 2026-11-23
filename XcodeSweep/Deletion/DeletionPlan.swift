@@ -108,7 +108,8 @@ struct DeletionReport: Identifiable, Hashable, Sendable {
     let simctlDeletedCount: Int
     let reclaimedBytes: Int64
     let failures: [DeletionFailure]
-    /// The user stopped the run, so items after the last outcome were never attempted.
+    /// The user stopped the run. The counts and failures are the acknowledged outcomes; an item in
+    /// flight at the stop may still have been removed, which the rescan that follows shows.
     let wasCancelled: Bool
 
     init(

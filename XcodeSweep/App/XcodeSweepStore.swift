@@ -119,7 +119,12 @@ final class XcodeSweepStore {
     @discardableResult
     func startRefresh() -> Task<Void, Never>? {
         guard !operation.isBusy else { return nil }
+        return beginRefresh()
+    }
 
+    /// Takes over the operation slot for a scan, whatever holds it now; callers guarantee no other
+    /// operation is running, as `startRefresh()` does and a finishing deletion does for its rescan.
+    private func beginRefresh() -> Task<Void, Never> {
         let previousInventory = inventory
         let previousWarnings = scanWarnings
 
@@ -166,7 +171,7 @@ final class XcodeSweepStore {
                 }
             }
         } catch is CancellationError {
-            // Interrupted, not failed: restore the last completed result and report nothing.
+            // Interrupted, not failed: restore the inventory from when this scan began, and report nothing.
             inventory = previousInventory
             scanWarnings = previousWarnings
         } catch {
@@ -284,18 +289,15 @@ final class XcodeSweepStore {
         let task = Task { [weak self] in
             guard let self else { return }
             await self.runDeletion(plan)
-            await self.startRefresh()?.value
+            // Hand the slot straight to the rescan, so the store is never idle between the phases.
+            await self.beginRefresh().value
         }
         operationTask = task
         return task
     }
 
+    /// Leaves `operation` as `.deleting`; the rescan that follows takes the slot from there.
     private func runDeletion(_ plan: DeletionPlan) async {
-        defer {
-            operation = .idle
-            operationTask = nil
-        }
-
         var removed: [StorageItem] = []
         var failures: [DeletionFailure] = []
         do {
@@ -307,7 +309,9 @@ final class XcodeSweepStore {
 
                 case let .deleted(itemID, progress):
                     operation = .deleting(progress)
-                    removed += plan.deletableItems.filter { $0.id == itemID }
+                    if let item = plan.deletableItems.first(where: { $0.id == itemID }) {
+                        removed.append(item)
+                    }
                     removeItems(withIDs: [itemID])
 
                 case let .failed(failure, progress):

@@ -662,8 +662,11 @@ struct XcodeSweepStoreTests {
 
     @Test("Stays busy until a cancelled deletion's simctl command has exited", .timeLimit(.minutes(1)))
     func cancelledDeletionBlocksNewOperationsUntilTeardownEnds() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
         let runner = SlowExitCommandRunner()
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
             fileTrasher: RecordingFileTrasher()
         ))
@@ -823,6 +826,48 @@ struct XcodeSweepStoreTests {
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .simulatorDevices).isEmpty)
         #expect(store.lastDeletionReport == nil)
+    }
+
+    @Test("Stays busy from deletion through its rescan, and Stop ends the rescan", .timeLimit(.minutes(1)))
+    func stopDuringPostDeletionRescanKeepsPostDeletionInventory() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let goneURL = try fixture.addDerivedData(folderName: "Gone-1", workspacePath: "/nonexistent/Gone.xcodeproj", lastAccessed: now)
+        let keptURL = try fixture.addDerivedData(folderName: "Kept-2", workspacePath: "/nonexistent/Kept.xcodeproj", lastAccessed: now)
+        let controller = ControllableCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        ))
+        let initialScan = store.startRefresh()
+        try await answerSimctl(controller)
+        await initialScan?.value
+        let gone = try #require(store.inventory.items(in: .derivedData).first { $0.path == goneURL })
+
+        // Given: the deletion finished and its rescan is parked on simctl
+        let deletion = store.startDeletion(DeletionPlan(selection: [gone]))
+        let call1 = try await controller.nextPendingCall()
+        let call2 = try await controller.nextPendingCall()
+        #expect(store.operation.isScanning)
+        #expect(store.lastDeletionReport?.deletedCount == 1)
+
+        // When
+        store.cancelOperation()
+        let cancelled = Task {
+            try await controller.waitForCancellation(id: call1.id)
+            try await controller.waitForCancellation(id: call2.id)
+        }
+        defer { cancelled.cancel() }
+        _ = try await awaitResult(of: cancelled, within: .seconds(10)).get()
+        _ = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10)).get()
+
+        // Then: the rescan stopped; the acknowledged removal and the report stay
+        #expect(store.operation == .idle)
+        #expect(store.inventory.items(in: .derivedData).map(\.path) == [keptURL])
+        #expect(store.lastDeletionReport?.deletedCount == 1)
     }
 
     private func makeScannedStore(

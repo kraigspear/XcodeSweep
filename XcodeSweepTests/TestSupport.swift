@@ -239,13 +239,24 @@ actor RecordingFileTrasher: FileTrashing {
         if failingPaths.contains(url.path) {
             throw TestTrashError(message: "Permission denied for \(url.lastPathComponent)")
         }
-        // Remove it as the Trash would, so a rescan sees what a real deletion leaves.
-        try? FileManager.default.removeItem(at: url)
+        try removeIfFixtureItem(url)
         trashedURLs.append(url)
     }
 }
 
 typealias ControllableFileTrasher = ParkedCalls<URL, Void>
+
+/// Removes `url` as the Trash would, so a rescan sees what a real deletion leaves, but only
+/// inside a `TempXcodeFixture`; synthetic paths such as `/tmp/sample` are just recorded.
+func removeIfFixtureItem(_ url: URL) throws {
+    let fixturesRoot = FileManager.default.temporaryDirectory
+        .resolvingSymlinksInPath().standardizedFileURL.path
+    let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+    guard path.hasPrefix(fixturesRoot + "/XcodeSweepTests-"),
+          FileManager.default.fileExists(atPath: url.path)
+    else { return }
+    try FileManager.default.removeItem(at: url)
+}
 
 // MARK: - Parked Calls
 
@@ -408,7 +419,7 @@ extension ParkedCalls: FileTrashing where Argument == URL, Output == Void {
 
     func trashItem(at url: URL) async throws {
         try await park(url)
-        try? FileManager.default.removeItem(at: url)
+        try removeIfFixtureItem(url)
     }
 
     func resume(id: UUID) {
