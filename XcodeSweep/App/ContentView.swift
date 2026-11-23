@@ -69,7 +69,10 @@ struct ContentView: View {
         } message: { pending in
             Text(pending.confirmationMessage)
         }
-        .alert("Cleanup Complete", item: $bindableStore.lastDeletionReport) { _ in
+        .alert(
+            store.lastDeletionReport?.wasCancelled == true ? "Cleanup Stopped" : "Cleanup Complete",
+            item: $bindableStore.lastDeletionReport
+        ) { _ in
         } message: { report in
             Text(report.summary)
         }

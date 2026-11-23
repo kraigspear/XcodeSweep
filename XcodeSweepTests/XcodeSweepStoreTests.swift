@@ -329,6 +329,8 @@ struct XcodeSweepStoreTests {
         #expect(await !controller.hasParkedCall)
 
         await trasher.resume(id: trashCall.id)
+        // The deletion's rescan runs next.
+        try await answerSimctl(controller)
         await deleteTask?.value
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .derivedData).isEmpty)
@@ -513,7 +515,7 @@ struct XcodeSweepStoreTests {
     }
 
     @Test(
-        "startDeletion owns the deletion task and cancelOperation stops mid-batch without showing a report",
+        "startDeletion owns the deletion task, and cancelOperation stops mid-batch and reports what was removed",
         .timeLimit(.minutes(1))
     )
     func startDeletionAndCancelOperationStopsMidBatch() async throws {
@@ -572,7 +574,10 @@ struct XcodeSweepStoreTests {
             await store.operation == .idle
         }
 
-        #expect(store.lastDeletionReport == nil)
+        let report = try #require(store.lastDeletionReport)
+        #expect(report.wasCancelled)
+        #expect(report.deletedCount == 1)
+        #expect(report.failures.isEmpty)
         #expect(store.errorMessage == nil)
         #expect(await trasher.trashedURLs == [firstURL])
         #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
@@ -751,6 +756,75 @@ struct XcodeSweepStoreTests {
         #expect(weakStore == nil)
     }
 
+    /// To replicate: delete several items where an early one fails → press Cancel → the alert
+    /// still lists that failure.
+    @Test("A cancelled deletion still reports the failures recorded before the cancel", .timeLimit(.minutes(1)))
+    func cancelledDeletionKeepsEarlierFailures() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let failingURL = try fixture.addDerivedData(folderName: "Fails-1", workspacePath: "/nonexistent/Fails.xcodeproj", lastAccessed: now)
+        let parkedURL = try fixture.addDerivedData(folderName: "Parked-2", workspacePath: "/nonexistent/Parked.xcodeproj", lastAccessed: now)
+        let trasher = ControllableFileTrasher()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: trasher,
+            now: { now }
+        ))
+        await store.startRefresh()?.value
+        let items = store.inventory.items(in: .derivedData)
+        let failing = try #require(items.first { $0.path == failingURL })
+        let parked = try #require(items.first { $0.path == parkedURL })
+
+        // Given: the first item fails and the second is in flight
+        let deletion = store.startDeletion(DeletionPlan(selection: [failing, parked]))
+        let first = try await trasher.nextPendingCall()
+        await trasher.resume(id: first.id, with: .failure(TestTrashError(message: "Item is locked")))
+        let second = try await trasher.nextPendingCall()
+        #expect(second.url == parkedURL)
+
+        // When
+        store.cancelOperation()
+        _ = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10)).get()
+
+        // Then
+        let report = try #require(store.lastDeletionReport)
+        #expect(report.wasCancelled)
+        #expect(report.deletedCount == 0)
+        #expect(report.failures.map(\.itemID) == [failing.id])
+        #expect(report.summary.contains("Item is locked"))
+    }
+
+    /// ADR 0001: a cancelled simctl delete may have taken effect. The rescan that follows every
+    /// deletion settles it, so the inventory shows what is really on disk.
+    @Test("Rescans after a cancelled simctl delete so a device it removed disappears", .timeLimit(.minutes(1)))
+    func rescanAfterCancelledDeleteDropsRemovedDevice() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let runner = DeleteTakesEffectThenParksRunner(udid: "GONE-1")
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        ))
+        await store.startRefresh()?.value
+        let device = try #require(store.inventory.items(in: .simulatorDevices).first)
+
+        // Given: simctl delete removed the device, but its result hasn't come back
+        let deletion = store.startDeletion(DeletionPlan(selection: [device]))
+        try await waitUntil("simctl delete in flight") { await runner.deleteInFlight }
+
+        // When
+        store.cancelOperation()
+        _ = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10)).get()
+
+        // Then: the rescan, not the cancelled delete, removed it from the inventory
+        #expect(store.operation == .idle)
+        #expect(store.inventory.items(in: .simulatorDevices).isEmpty)
+        #expect(store.lastDeletionReport == nil)
+    }
+
     private func makeScannedStore(
         extraDerivedDataFolders: [String] = []
     ) async throws -> (XcodeSweepStore, TempXcodeFixture) {
@@ -809,6 +883,36 @@ enum StoreOperation: CaseIterable, Sendable {
                 category: .simulatorDevices,
                 method: .simctlDevice(udid: "UDID-1")
             )]))
+        }
+    }
+}
+
+/// Lists one device until `simctl delete` runs; the delete removes it, then stays in flight until
+/// cancelled, as a delete that took effect before its result reached Swift.
+private actor DeleteTakesEffectThenParksRunner: CommandRunning {
+    let udid: String
+    private(set) var deleteInFlight = false
+    private var deleted = false
+
+    init(udid: String) {
+        self.udid = udid
+    }
+
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
+        switch arguments {
+        case ["simctl", "list", "devices", "-j"]:
+            let devices = deleted ? "" : #"{"udid":"\#(udid)","isAvailable":true,"state":"Shutdown","name":"iPhone 17"}"#
+            let json = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[\#(devices)]}}"#
+            return CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
+        case ["simctl", "delete", udid]:
+            deleted = true
+            deleteInFlight = true
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            throw CancellationError()
+        default:
+            return CommandOutput(stdout: Data(#"{}"#.utf8), stderr: Data(), terminationStatus: 0)
         }
     }
 }

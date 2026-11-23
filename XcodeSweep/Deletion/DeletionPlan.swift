@@ -102,12 +102,39 @@ struct DeletionProgress: Equatable, Sendable {
     }
 }
 
-/// Outcome of a batch deletion operation.
+/// Outcome of a batch deletion operation, whether it finished or the user stopped it.
 struct DeletionReport: Identifiable, Hashable, Sendable {
     let trashedCount: Int
     let simctlDeletedCount: Int
     let reclaimedBytes: Int64
     let failures: [DeletionFailure]
+    /// The user stopped the run, so items after the last outcome were never attempted.
+    let wasCancelled: Bool
+
+    init(
+        trashedCount: Int,
+        simctlDeletedCount: Int,
+        reclaimedBytes: Int64,
+        failures: [DeletionFailure],
+        wasCancelled: Bool = false
+    ) {
+        self.trashedCount = trashedCount
+        self.simctlDeletedCount = simctlDeletedCount
+        self.reclaimedBytes = reclaimedBytes
+        self.failures = failures
+        self.wasCancelled = wasCancelled
+    }
+
+    init(removed: [StorageItem], failures: [DeletionFailure], wasCancelled: Bool = false) {
+        let permanentCount = removed.filter(\.deletionMethod.isPermanent).count
+        self.init(
+            trashedCount: removed.count - permanentCount,
+            simctlDeletedCount: permanentCount,
+            reclaimedBytes: removed.reduce(0) { $0 + $1.sizeBytes },
+            failures: failures,
+            wasCancelled: wasCancelled
+        )
+    }
 
     var id: Self {
         self
@@ -149,7 +176,8 @@ extension DeletionReport {
     /// Completion alert text; failures are capped so the alert stays readable.
     var summary: String {
         let reclaimed = ByteCountFormatter.string(fromByteCount: reclaimedBytes, countStyle: .file)
-        var lines = ["Removed \(deletedCount) \(plural("item", deletedCount)) (~\(reclaimed))."]
+        let removed = "\(deletedCount) \(plural("item", deletedCount)) (~\(reclaimed))"
+        var lines = [wasCancelled ? "Stopped after removing \(removed)." : "Removed \(removed)."]
 
         if trashedCount > 0 {
             lines.append("Moved \(trashedCount) to Trash (empty Trash to free disk space immediately).")

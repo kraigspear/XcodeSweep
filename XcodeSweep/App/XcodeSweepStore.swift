@@ -265,13 +265,15 @@ final class XcodeSweepStore {
         pendingDeletion = plan
     }
 
-    /// Starts deleting the plan's items, removing each from the inventory as it goes.
+    /// Starts deleting the plan's items, removing each from the inventory as it goes, then rescans.
     ///
-    /// Sets `lastDeletionReport` on completion. If cancelled, items already deleted stay removed
-    /// and no report is set. Call `cancelOperation()` to stop it.
+    /// Sets `lastDeletionReport` when the run completes, or when it is cancelled after removing or
+    /// failing at least one item. The rescan runs however the deletion ends: a cancelled `simctl`
+    /// delete may have taken effect, and free space and simulator availability have changed.
+    /// Call `cancelOperation()` to stop either phase.
     ///
-    /// - Returns: The deletion's task, for callers that wait on it; `nil` if busy or the plan is
-    ///   empty, and nothing started.
+    /// - Returns: The task for the deletion and its rescan, for callers that wait on it; `nil` if
+    ///   busy or the plan is empty, and nothing started.
     @discardableResult
     func startDeletion(_ plan: DeletionPlan) -> Task<Void, Never>? {
         guard !operation.isBusy, !plan.isEmpty else { return nil }
@@ -282,6 +284,7 @@ final class XcodeSweepStore {
         let task = Task { [weak self] in
             guard let self else { return }
             await self.runDeletion(plan)
+            await self.startRefresh()?.value
         }
         operationTask = task
         return task
@@ -293,6 +296,8 @@ final class XcodeSweepStore {
             operationTask = nil
         }
 
+        var removed: [StorageItem] = []
+        var failures: [DeletionFailure] = []
         do {
             try Task.checkCancellation()
             for try await event in xcodeStorage.delete(plan) {
@@ -302,10 +307,12 @@ final class XcodeSweepStore {
 
                 case let .deleted(itemID, progress):
                     operation = .deleting(progress)
+                    removed += plan.deletableItems.filter { $0.id == itemID }
                     removeItems(withIDs: [itemID])
 
-                case let .failed(_, progress):
+                case let .failed(failure, progress):
                     operation = .deleting(progress)
+                    failures.append(failure)
 
                 case let .completed(report):
                     lastDeletionReport = report
@@ -313,7 +320,10 @@ final class XcodeSweepStore {
                 }
             }
         } catch is CancellationError {
-            // Interrupted, not failed: already-deleted items stay removed and no completion alert is shown.
+            // Interrupted, not failed: report what happened before the stop, if anything did.
+            if !removed.isEmpty || !failures.isEmpty {
+                lastDeletionReport = DeletionReport(removed: removed, failures: failures, wasCancelled: true)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

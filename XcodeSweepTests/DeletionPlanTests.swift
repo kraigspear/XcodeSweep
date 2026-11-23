@@ -110,6 +110,22 @@ struct DeletionPlanTests {
         #expect(!summary.contains("Item 5"))
     }
 
+    /// To replicate: cancel a cleanup after one item was removed → read the Cleanup Stopped alert.
+    @Test("A stopped report says the run was stopped and builds its counts from the removed items")
+    func stoppedReportSummary() {
+        let removed = [
+            makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd"))),
+            makeStorageItem(id: "rt", sizeBytes: 50, method: .simctlRuntime(identifier: "RT-1")),
+        ]
+        let report = DeletionReport(removed: removed, failures: [], wasCancelled: true)
+
+        #expect(report.trashedCount == 1)
+        #expect(report.simctlDeletedCount == 1)
+        #expect(report.reclaimedBytes == 150)
+        #expect(report.summary.hasPrefix("Stopped after removing 2 items"))
+        #expect(DeletionReport(removed: removed, failures: []).summary.hasPrefix("Removed 2 items"))
+    }
+
     @Test("Plans, reports, and failures with the same contents are equal")
     func deletionValuesCompareByContents() {
         let selection = [makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd")))]

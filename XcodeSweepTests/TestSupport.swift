@@ -239,6 +239,8 @@ actor RecordingFileTrasher: FileTrashing {
         if failingPaths.contains(url.path) {
             throw TestTrashError(message: "Permission denied for \(url.lastPathComponent)")
         }
+        // Remove it as the Trash would, so a rescan sees what a real deletion leaves.
+        try? FileManager.default.removeItem(at: url)
         trashedURLs.append(url)
     }
 }
@@ -406,6 +408,7 @@ extension ParkedCalls: FileTrashing where Argument == URL, Output == Void {
 
     func trashItem(at url: URL) async throws {
         try await park(url)
+        try? FileManager.default.removeItem(at: url)
     }
 
     func resume(id: UUID) {
