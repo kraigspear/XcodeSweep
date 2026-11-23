@@ -97,7 +97,8 @@ struct XcodeStorage: Sendable {
 
     /// Inspects `inputs` concurrently, returning the items found sorted largest first.
     ///
-    /// Inputs not yet started, or whose `inspect` throws (it throws only on cancellation), are skipped.
+    /// A child already cancelled when it starts skips its input, and an input whose `inspect` throws
+    /// contributes no item; the inspections here throw only on cancellation.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
         inspect: @escaping @Sendable (Input) throws -> StorageItem?

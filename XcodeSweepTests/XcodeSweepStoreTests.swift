@@ -617,6 +617,119 @@ struct XcodeSweepStoreTests {
         #expect(store.selectionPlan.isEmpty)
     }
 
+    /// Stop can't let the next operation in while the stopped one is still tearing down, such as a
+    /// cancelled simctl child that hasn't exited yet.
+    @Test("Stays busy until a stopped scan finishes tearing down", .timeLimit(.minutes(1)))
+    func stoppedScanBlocksNewOperationsUntilTeardownEnds() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let runner = SlowExitCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        ))
+        let target = makeStorageItem(id: "dd", method: .trashFile(fixture.rootURL.appendingPathComponent("dd")))
+
+        // Given: a scan whose simctl commands are both in flight
+        let scan = store.startRefresh()
+        try await waitUntil("both simctl commands started") { await runner.startedCount == 2 }
+
+        // When: Stop is pressed but the commands haven't exited yet
+        store.cancelOperation()
+
+        // Then: nothing new can start until they do
+        #expect(store.operation.isScanning)
+        #expect(store.startRefresh() == nil)
+        #expect(store.startDeletion(DeletionPlan(selection: [target])) == nil)
+
+        await runner.finishExiting()
+        let result = try await awaitResult(of: Task { await scan?.value }, within: .seconds(10))
+        _ = try result.get()
+        #expect(store.operation == .idle)
+        #expect(store.startRefresh() != nil)
+    }
+
+    @Test("Stays busy until a cancelled deletion's simctl command has exited", .timeLimit(.minutes(1)))
+    func cancelledDeletionBlocksNewOperationsUntilTeardownEnds() async throws {
+        let runner = SlowExitCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        ))
+        let device = makeStorageItem(
+            id: "sim",
+            category: .simulatorDevices,
+            method: .simctlDevice(udid: "UDID-1", isBooted: false)
+        )
+
+        // Given: a deletion whose simctl delete is in flight
+        let deletion = store.startDeletion(DeletionPlan(selection: [device]))
+        try await waitUntil("simctl delete started") { await runner.startedCount == 1 }
+
+        // When
+        store.cancelOperation()
+
+        // Then
+        #expect(store.operation.isDeleting)
+        #expect(store.startRefresh() == nil)
+        #expect(store.startDeletion(DeletionPlan(selection: [device])) == nil)
+
+        await runner.finishExiting()
+        let result = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10))
+        _ = try result.get()
+        #expect(store.operation == .idle)
+        #expect(store.lastDeletionReport == nil)
+    }
+
+    @Test("An operation started on a store that is then released never runs", .timeLimit(.minutes(1)))
+    func releasedStoreBeforeTaskEntryRunsNothing() async throws {
+        let runner = SlowExitCommandRunner()
+        weak var weakStore: XcodeSweepStore?
+        var task: Task<Void, Never>?
+        do {
+            let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+                commandRunner: runner,
+                fileTrasher: RecordingFileTrasher()
+            ))
+            weakStore = store
+            // The task can't start until this test suspends, so the store goes first.
+            task = store.startRefresh()
+        }
+
+        #expect(weakStore == nil)
+        let result = try await awaitResult(of: Task { await task?.value }, within: .seconds(10))
+        _ = try result.get()
+        #expect(await runner.startedCount == 0)
+    }
+
+    @Test("A cancelled operation does not keep its store alive", .timeLimit(.minutes(1)))
+    func cancelledOperationReleasesStore() async throws {
+        let runner = SlowExitCommandRunner()
+        weak var weakStore: XcodeSweepStore?
+        var task: Task<Void, Never>?
+        do {
+            let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+                commandRunner: runner,
+                fileTrasher: RecordingFileTrasher()
+            ))
+            weakStore = store
+            task = store.startRefresh()
+            try await waitUntil("simctl commands started") { await runner.startedCount == 2 }
+            store.cancelOperation()
+        }
+
+        await runner.finishExiting()
+        let result = try await awaitResult(of: Task { await task?.value }, within: .seconds(10))
+        _ = try result.get()
+        task = nil
+        // Releases happen as the task's frames unwind, so poll briefly instead of asserting at once.
+        for _ in 0 ..< 100 where weakStore != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(weakStore == nil)
+    }
+
     private func makeScannedStore(
         extraDerivedDataFolders: [String] = []
     ) async throws -> (XcodeSweepStore, TempXcodeFixture) {

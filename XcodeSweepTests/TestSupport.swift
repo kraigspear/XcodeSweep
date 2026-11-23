@@ -535,3 +535,49 @@ func finalScanSnapshot(from storage: XcodeStorage) async throws -> ScanSnapshot 
     }
     return try #require(snapshot)
 }
+
+/// A one-shot latch: `wait()` returns once `signal()` has been called.
+actor AsyncSignal {
+    private var signalled = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        signalled = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending {
+            waiter.resume()
+        }
+    }
+
+    func wait() async {
+        if signalled {
+            return
+        }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            if signalled {
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+            }
+        }
+    }
+}
+
+/// A runner whose commands stay in flight after cancellation until `finishExiting()`, as
+/// ProcessRunner does while a cancelled child exits; then each throws CancellationError.
+actor SlowExitCommandRunner: CommandRunning {
+    private(set) var startedCount = 0
+    private let exited = AsyncSignal()
+
+    func run(executableURL _: URL, arguments _: [String], timeout _: Duration?) async throws -> CommandOutput {
+        startedCount += 1
+        await exited.wait()
+        try Task.checkCancellation()
+        return CommandOutput(stdout: Data(#"{"devices":{}}"#.utf8), stderr: Data(), terminationStatus: 0)
+    }
+
+    func finishExiting() async {
+        await exited.signal()
+    }
+}

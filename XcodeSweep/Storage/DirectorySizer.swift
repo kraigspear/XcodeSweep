@@ -48,8 +48,13 @@ enum DirectorySizer {
             return 0
         }
 
+        return try totalSize(of: enumerator.lazy.compactMap { $0 as? URL })
+    }
+
+    /// Sums `entries`, checking for cancellation before each one so Stop doesn't wait out a large walk.
+    static func totalSize(of entries: some Sequence<URL>) throws(CancellationError) -> Int64 {
         var total: Int64 = 0
-        for case let fileURL as URL in enumerator {
+        for fileURL in entries {
             if Task.isCancelled {
                 throw CancellationError()
             }
