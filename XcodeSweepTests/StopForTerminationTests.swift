@@ -22,6 +22,7 @@ struct StopForTerminationTests {
 
         // When: the app stops the store to quit
         let teardown = try #require(store.stopForTermination())
+        #expect(teardown.isCancelled)
         _ = try await awaitResult(of: Task { await teardown.value }, within: .seconds(10)).get()
 
         // Then: idle, only the first item moved, the third never requested, and no rescan ran
@@ -36,7 +37,7 @@ struct StopForTerminationTests {
     func keepRunningCancelsQuit() async throws {
         let (store, urls, trasher, _, fixture) = try await makeScannedStore()
         defer { fixture.cleanup() }
-        store.startDeletion(plan(of: store, inOrder: urls))
+        let deletion = try #require(store.startDeletion(plan(of: store, inOrder: urls)))
         let first = try await trasher.nextPendingCall()
         let delegate = AppDelegate()
         delegate.xcodeSweepStore = store
@@ -49,9 +50,14 @@ struct StopForTerminationTests {
         let second = try await trasher.nextPendingCall()
 
         #expect(answer == .terminateCancel)
+        #expect(!deletion.isCancelled)
         #expect(second.argument == urls[1])
         #expect(replies.isEmpty)
         await trasher.resume(id: second.id)
+        let third = try await trasher.nextPendingCall()
+        await trasher.resume(id: third.id)
+        _ = try await awaitResult(of: Task { await deletion.value }, within: .seconds(10)).get()
+        #expect(await trasher.completedArguments == urls)
     }
 
     /// AppKit must hear "quit" exactly once, and only after the cleanup has torn down.
@@ -72,7 +78,7 @@ struct StopForTerminationTests {
             now: { now }
         ))
         await store.startRefresh()?.value
-        store.startDeletion(plan(of: store, inOrder: urls))
+        let deletion = try #require(store.startDeletion(plan(of: store, inOrder: urls)))
         await trasher.waitUntilStarted()
         let delegate = AppDelegate()
         delegate.xcodeSweepStore = store
@@ -85,6 +91,8 @@ struct StopForTerminationTests {
 
         // When: the user chooses Stop and Quit while the move is still running
         let answer = delegate.applicationShouldTerminate(NSApplication.shared)
+        // Cancelled by the time the delegate returns, not on a later turn.
+        let cancelledOnReturn = deletion.isCancelled
         try await Task.sleep(for: .milliseconds(100))
         let repliesWhileHeld = replies.withLock { $0.count }
         await trasher.release()
@@ -92,6 +100,7 @@ struct StopForTerminationTests {
 
         // Then: quitting waited for the move, and no later item started
         #expect(answer == .terminateLater)
+        #expect(cancelledOnReturn)
         #expect(repliesWhileHeld == 0)
         #expect(replies.withLock { $0.map(\.answer) } == [true])
         #expect(replies.withLock { $0.first?.wasIdle } == true)

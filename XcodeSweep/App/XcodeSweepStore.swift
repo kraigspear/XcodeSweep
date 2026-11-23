@@ -100,7 +100,7 @@ final class XcodeSweepStore {
         operationTask?.cancel()
     }
 
-    /// Stops the running scan or deletion for good, returning once it has torn down.
+    /// Stops the running scan or deletion for good; await the returned task for its teardown.
     ///
     /// For quitting: unlike `cancelOperation()`, a stopped deletion isn't followed by a rescan.
     /// The store doesn't expect to run another operation afterward. Cancels before returning, so
