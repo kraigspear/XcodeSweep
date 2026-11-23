@@ -174,7 +174,10 @@ extension DeletionMethod {
 }
 
 extension DeletionReport {
-    /// Completion alert text; failures are capped so the alert stays readable.
+    private static let listedFailureLimit = 4
+
+    /// Completion alert text; failures are capped so the alert stays readable, and the rest are
+    /// counted.
     var summary: String {
         let reclaimed = ByteCountFormatter.string(fromByteCount: reclaimedBytes, countStyle: .file)
         let removed = "\(deletedCount) \(plural("item", deletedCount)) (~\(reclaimed))"
@@ -188,10 +191,13 @@ extension DeletionReport {
         }
         if hasFailures {
             let failureText = failures
-                .prefix(4)
+                .prefix(Self.listedFailureLimit)
                 .map { "• \($0.itemName): \($0.reason)" }
                 .joined(separator: "\n")
             lines.append("\nCould not remove \(failures.count):\n\(failureText)")
+            if failures.count > Self.listedFailureLimit {
+                lines.append("…and \(failures.count - Self.listedFailureLimit) more.")
+            }
         }
 
         return lines.joined(separator: "\n")

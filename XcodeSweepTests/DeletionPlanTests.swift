@@ -88,9 +88,10 @@ struct DeletionPlanTests {
         #expect(!message.contains("shut down"))
     }
 
-    /// Verifies the completion alert lists failures, capped so the alert stays readable.
+    /// Verifies the completion alert lists failures, capped so the alert stays readable, and says
+    /// how many it left out.
     /// To replicate: delete a batch where several items fail → read the Cleanup Complete alert.
-    @Test("Report summary lists counts and caps failure lines")
+    @Test("Report summary lists counts, caps failure lines, and counts the rest")
     func reportSummary_withManyFailures_capsListedFailures() {
         let failures = (1 ... 6).map { DeletionFailure(itemID: "f\($0)", itemName: "Item \($0)", reason: "Busy") }
         let report = DeletionReport(
@@ -108,6 +109,16 @@ struct DeletionPlanTests {
         #expect(summary.contains("Could not remove 6"))
         #expect(summary.contains("Item 4: Busy"))
         #expect(!summary.contains("Item 5"))
+        #expect(summary.contains("…and 2 more."))
+    }
+
+    @Test("A summary with every failure listed doesn't mention more")
+    func reportSummary_withFewFailures_listsAll() {
+        let failures = (1 ... 4).map { DeletionFailure(itemID: "f\($0)", itemName: "Item \($0)", reason: "Busy") }
+        let report = DeletionReport(trashedCount: 0, simctlDeletedCount: 0, reclaimedBytes: 0, failures: failures)
+
+        #expect(report.summary.contains("Item 4: Busy"))
+        #expect(!report.summary.contains("more"))
     }
 
     /// To replicate: cancel a cleanup after one item was removed → read the Cleanup Stopped alert.

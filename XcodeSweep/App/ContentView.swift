@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     let store: XcodeSweepStore
+    /// The report whose failures the full list shows; non-nil presents it.
+    @State private var failureListReport: DeletionReport?
 
     var body: some View {
         @Bindable var bindableStore = store
@@ -72,9 +74,18 @@ struct ContentView: View {
         .alert(
             store.lastDeletionReport?.wasCancelled == true ? "Cleanup Stopped" : "Cleanup Complete",
             item: $bindableStore.lastDeletionReport
-        ) { _ in
+        ) { report in
+            if report.hasFailures {
+                Button("Show All Failures") {
+                    failureListReport = report
+                }
+            }
+            Button("OK", role: .cancel) {}
         } message: { report in
             Text(report.summary)
+        }
+        .sheet(item: $failureListReport) { report in
+            FailureListView(failures: report.failures)
         }
         .alert("Scan Error", item: $bindableStore.errorMessage) { _ in
         } message: { message in
