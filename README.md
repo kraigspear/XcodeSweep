@@ -13,6 +13,8 @@ A native macOS SwiftUI utility for inspecting and safely cleaning Xcode build an
 - **SwiftUI Previews** (`~/Library/Developer/Xcode/UserData/Previews/Simulator Devices`).
 - **Archives & Caches** (`~/Library/Developer/Xcode/Archives`, plus the caches Xcode shares across projects in `DerivedData`, such as `ModuleCache.noindex` and `SDKExplicitPrecompiledModules`).
 
+XcodeSweep scans at launch. When you return to it, it rescans if the last completed scan is more than 15 minutes old, the app is idle, and no cleanup is awaiting confirmation.
+
 ## Deletion Safety
 
 - Filesystem items (`DerivedData`, `DeviceSupport`, `Previews`, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible.

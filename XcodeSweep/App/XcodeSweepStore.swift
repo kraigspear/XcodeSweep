@@ -110,6 +110,28 @@ final class XcodeSweepStore {
         }
     }
 
+    /// How old a scan can get before `refreshIfStale()` replaces it.
+    ///
+    /// A rescan takes seconds and blocks cleanup, so a quick switch to Finder or Xcode shouldn't
+    /// trigger one. But a build changes DerivedData within minutes, so a user returning after one,
+    /// or after a break, should see current sizes and statuses.
+    private static let staleScanAge: TimeInterval = 15 * 60
+
+    /// Rescans when the last completed scan is older than `staleScanAge`.
+    ///
+    /// Does nothing while busy, while a deletion awaits confirmation, or before any scan has
+    /// completed, which the launch scan handles.
+    ///
+    /// - Returns: The scan's task; `nil` if nothing started.
+    @discardableResult
+    func refreshIfStale() -> Task<Void, Never>? {
+        guard pendingDeletion == nil,
+              let scannedAt = inventory.scannedAt,
+              xcodeStorage.now().timeIntervalSince(scannedAt) > Self.staleScanAge
+        else { return nil }
+        return startRefresh()
+    }
+
     /// Starts rescanning all categories, updating the inventory as each category finishes.
     ///
     /// If the scan fails or is cancelled, the previous inventory is restored; only a failure sets
