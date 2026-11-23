@@ -116,7 +116,7 @@ struct XcodeStorageCancellationTests {
 
         #expect(await runner.recordedArguments == [["simctl", "shutdown", udid]])
         // Nothing reached simctl delete, so the log mustn't suggest the device may be gone.
-        let entries = try deletionLogEntries(endingWith: udid)
+        let entries = try deletionLogEntries(mentioning: udid)
         #expect(entries.map(\.composedMessage) == ["outcome=skipped method=simctlDevice target=\(udid)"])
     }
 

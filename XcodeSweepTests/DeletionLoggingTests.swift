@@ -21,8 +21,8 @@ struct DeletionLoggingTests {
 
         for try await _ in storage.delete(plan) {}
 
-        let good = try deletionLogEntries(endingWith: goodURL.path)
-        let bad = try deletionLogEntries(endingWith: badURL.path, orReason: "Permission denied for Locked")
+        let good = try deletionLogEntries(mentioning: goodURL.path)
+        let bad = try deletionLogEntries(mentioning: badURL.path)
         #expect(good.map(\.level) == [.notice])
         #expect(good.map(\.composedMessage) == ["outcome=removed method=trash bytes=2048 target=\(goodURL.path)"])
         #expect(bad.map(\.level) == [.error])
@@ -49,7 +49,7 @@ struct DeletionLoggingTests {
         _ = try await trasher.nextPendingCall()
         _ = try await cancelAndAwaitResult(of: deletion, within: .seconds(10))
 
-        let entries = try deletionLogEntries(endingWith: url.path)
+        let entries = try deletionLogEntries(mentioning: url.path)
         #expect(entries.map(\.level) == [.notice])
         #expect(entries.map(\.composedMessage) == ["outcome=unknown method=trash target=\(url.path)"])
     }
@@ -80,7 +80,7 @@ struct DeletionLoggingTests {
         #expect(delete.argument == ["simctl", "delete", udid])
         _ = try await cancelAndAwaitResult(of: deletion, within: .seconds(10))
 
-        let entries = try deletionLogEntries(endingWith: udid)
+        let entries = try deletionLogEntries(mentioning: udid)
         #expect(entries.map(\.composedMessage) == ["outcome=unknown method=simctlDevice target=\(udid)"])
     }
 
@@ -89,18 +89,17 @@ struct DeletionLoggingTests {
     }
 }
 
-/// This process's deletion log entries whose message ends with `target=<target>`, or with
-/// `target=<target> reason=<reason>` when a reason is given.
+/// Every deletion log entry from this process that mentions `target`, so a test sees any
+/// contradictory record for its item, not just the one it expects.
 ///
 /// Reads every entry since the process started rather than from a time, which a clock change
 /// could move past the entries; each test's unique target tells them apart.
-func deletionLogEntries(endingWith target: String, orReason reason: String? = nil) throws -> [OSLogEntryLog] {
-    let suffix = reason.map { "target=\(target) reason=\($0)" } ?? "target=\(target)"
+func deletionLogEntries(mentioning target: String) throws -> [OSLogEntryLog] {
     let store = try OSLogStore(scope: .currentProcessIdentifier)
     return try store.getEntries()
         .compactMap { $0 as? OSLogEntryLog }
         .filter {
             $0.subsystem == "com.kraigspear.XcodeSweep" && $0.category == "🗑️deletion"
-                && $0.composedMessage.hasSuffix(suffix)
+                && $0.composedMessage.contains(target)
         }
 }

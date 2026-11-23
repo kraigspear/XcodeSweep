@@ -43,7 +43,7 @@ extension XcodeStorage {
         } catch {
             // Fails when the device is already shut down; delete reports any real problem.
         }
-        try Task.checkCancellation()
+        // `removing` checks cancellation first, so a stop during shutdown skips the delete.
         try await Self.removing {
             _ = try await commandRunner.run(
                 executableURL: Self.xcrunURL,

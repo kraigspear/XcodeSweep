@@ -97,7 +97,12 @@ struct XcodeStorage: Sendable {
     }
 
     /// Runs the step that removes an item, reporting cancellation during it as `RemovalInterrupted`.
+    ///
+    /// Cancellation seen before the step starts stays `CancellationError`: nothing was removed. A
+    /// runner can't say whether a cancelled command launched, so a cancel after the step starts may
+    /// have stopped it before launch too; `RemovalInterrupted` means "may have been removed".
     static func removing(_ removal: () async throws -> Void) async throws {
+        guard !Task.isCancelled else { throw CancellationError() }
         do {
             try await removal()
         } catch is CancellationError {
