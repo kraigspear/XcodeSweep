@@ -435,7 +435,7 @@ struct XcodeStorageScanTests {
 
         // Given: shared caches with no info.plist, a project folder that lost its info.plist,
         // and a project folder Xcode named without the usual hash
-        for cache in ["SDKExplicitPrecompiledModules", "CompilationCache.noindex", "SymbolCache.noindex"] {
+        for cache in ["SDKExplicitPrecompiledModules", "CompilationCache.noindex", "SymbolCache.noindex", "moduleCache"] {
             let url = derivedData.appendingPathComponent(cache, isDirectory: true)
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             try Data(repeating: 0xCC, count: 4096).write(to: url.appendingPathComponent("cache.bin"))
@@ -473,5 +473,7 @@ struct XcodeStorageScanTests {
             #expect((caches[cache]?.sizeBytes ?? 0) > 0, "\(cache)")
         }
         #expect(caches["ModuleCache.noindex"]?.status == .stale)
+        // A cache folder whose name matches the module cache's id must not share it.
+        #expect(caches["ModuleCache.noindex"]?.id != caches["moduleCache"]?.id)
     }
 }

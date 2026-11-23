@@ -3,8 +3,8 @@ import Foundation
 extension XcodeStorage {
     static let moduleCacheFolderName = "ModuleCache.noindex"
 
-    func scanDerivedData(now: Date) async -> [StorageItem] {
-        await Self.scanConcurrently(derivedDataFolders().projects) { folderURL in
+    func scanDerivedData(_ projectFolders: [URL], now: Date) async -> [StorageItem] {
+        await Self.scanConcurrently(projectFolders) { folderURL in
             try Self.inspectDerivedDataFolder(at: folderURL, now: now)
         }
     }

@@ -107,12 +107,12 @@ extension XcodeStorage {
 
     // MARK: - Archives & Caches
 
-    func scanArchivesAndCaches() async throws(CancellationError) -> [StorageItem] {
+    func scanArchivesAndCaches(sharedCaches: [URL]) async throws(CancellationError) -> [StorageItem] {
         var items: [StorageItem] = []
         let fileManager = FileManager.default
 
         // 1. Caches Xcode shares across projects in DerivedData
-        for cacheURL in derivedDataFolders().sharedCaches {
+        for cacheURL in sharedCaches {
             try items.append(Self.inspectSharedCache(at: cacheURL))
         }
 
@@ -148,17 +148,17 @@ extension XcodeStorage {
 
     // MARK: - Private Inspection
 
-    /// The module cache keeps its long-standing Unused status; other shared caches aren't
-    /// recommended, since clearing one slows every project's next build.
+    /// The module cache keeps its long-standing Unused status. Other folders aren't recommended:
+    /// most are build caches, and clearing one can slow the builds that use it.
     private static func inspectSharedCache(at url: URL) throws(CancellationError) -> StorageItem {
         let isModuleCache = url.lastPathComponent == moduleCacheFolderName
         return try StorageItem(
-            id: isModuleCache ? "cache:moduleCache" : "cache:\(url.lastPathComponent)",
+            id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
             name: url.lastPathComponent,
             subtitle: isModuleCache
                 ? "Shared Swift/Clang module cache (safely regenerated on next build)"
-                : "Shared Xcode build cache (regenerated on next build)",
+                : "Shared DerivedData folder, not tied to one project",
             sizeBytes: DirectorySizer.allocatedSize(of: url),
             lastUsedDate: modificationDate(of: url),
             path: url,
