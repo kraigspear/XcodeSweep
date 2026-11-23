@@ -800,7 +800,7 @@ struct XcodeSweepStoreTests {
     }
 
     /// ADR 0001: a cancelled simctl delete may have taken effect. The rescan that follows every
-    /// deletion settles it, so the inventory shows what is really on disk.
+    /// deletion, except one stopped to quit, settles it, so the inventory shows what is really on disk.
     @Test("Rescans after a cancelled simctl delete so a device it removed disappears", .timeLimit(.minutes(1)))
     func rescanAfterCancelledDeleteDropsRemovedDevice() async throws {
         let fixture = try TempXcodeFixture()

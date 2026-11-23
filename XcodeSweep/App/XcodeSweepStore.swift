@@ -103,12 +103,14 @@ final class XcodeSweepStore {
     /// Stops the running scan or deletion for good, returning once it has torn down.
     ///
     /// For quitting: unlike `cancelOperation()`, a stopped deletion isn't followed by a rescan.
-    /// The store doesn't expect to run another operation afterward.
-    func stopForTermination() async {
+    /// The store doesn't expect to run another operation afterward. Cancels before returning, so
+    /// no further item starts once the caller has decided to quit.
+    ///
+    /// - Returns: The stopped operation's task, which finishes once teardown has; `nil` if idle.
+    func stopForTermination() -> Task<Void, Never>? {
         isTerminating = true
-        guard let task = operationTask else { return }
-        task.cancel()
-        await task.value
+        operationTask?.cancel()
+        return operationTask
     }
 
     // MARK: - Scanning
@@ -303,7 +305,8 @@ final class XcodeSweepStore {
     /// Starts deleting the plan's items, removing each from the inventory as it goes, then rescans.
     ///
     /// Sets `lastDeletionReport` when the run completes, or when it is cancelled after removing or
-    /// failing at least one item. The rescan runs however the deletion ends: a cancelled `simctl`
+    /// failing at least one item. The rescan runs however the deletion ends, unless the app is
+    /// quitting (see `stopForTermination()`): a cancelled `simctl`
     /// delete may have taken effect, and free space and simulator availability have changed.
     /// Call `cancelOperation()` to stop either phase.
     ///
@@ -331,7 +334,8 @@ final class XcodeSweepStore {
         return task
     }
 
-    /// Leaves `operation` as `.deleting`; the rescan that follows takes the slot from there.
+    /// Leaves `operation` as `.deleting`; the rescan that follows, or the stop for quitting, takes
+    /// the slot from there.
     private func runDeletion(_ plan: DeletionPlan) async {
         var removed: [StorageItem] = []
         var failures: [DeletionFailure] = []

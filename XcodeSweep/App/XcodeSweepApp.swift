@@ -73,22 +73,32 @@ struct XcodeSweepApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var xcodeSweepStore: XcodeSweepStore?
+    /// Asks whether to stop the cleanup and quit. Tests answer instead of an alert.
+    var confirmStopAndQuit: @MainActor () -> Bool = AppDelegate.askToStopAndQuit
+    /// Tells AppKit whether to quit, after `.terminateLater`. Tests record the answer instead.
+    var replyToTermination: @MainActor (Bool) -> Void = { NSApplication.shared.reply(toApplicationShouldTerminate: $0) }
 
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
         // A scan only reads, so quitting during one needs no question.
         guard let xcodeSweepStore, xcodeSweepStore.operation.isDeleting else { return .terminateNow }
+        guard confirmStopAndQuit() else { return .terminateCancel }
 
+        // Cancelled now, before returning, so no further item starts while teardown runs.
+        let teardown = xcodeSweepStore.stopForTermination()
+        let reply = replyToTermination
+        Task {
+            await teardown?.value
+            reply(true)
+        }
+        return .terminateLater
+    }
+
+    private static func askToStopAndQuit() -> Bool {
         let alert = NSAlert()
         alert.messageText = "A cleanup is still running"
         alert.informativeText = "Stop it and quit? The item being removed now is finished or stopped, and nothing after it is removed."
         alert.addButton(withTitle: "Stop and Quit")
         alert.addButton(withTitle: "Keep Running")
-        guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
-
-        Task {
-            await xcodeSweepStore.stopForTermination()
-            sender.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
