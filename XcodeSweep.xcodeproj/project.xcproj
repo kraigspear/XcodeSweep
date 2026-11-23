@@ -33,6 +33,7 @@
           "path": "Deletion",
           "children": [
             { "path": "DeletionPlan.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "FailureListView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
           ],
         },
         {
