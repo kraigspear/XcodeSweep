@@ -682,40 +682,55 @@ struct XcodeSweepStoreTests {
         #expect(store.lastDeletionReport == nil)
     }
 
-    @Test("An operation started on a store that is then released never runs", .timeLimit(.minutes(1)))
-    func releasedStoreBeforeTaskEntryRunsNothing() async throws {
+    @Test(
+        "An operation started on a store that is then released never runs",
+        .timeLimit(.minutes(1)),
+        arguments: StoreOperation.allCases
+    )
+    func releasedStoreBeforeTaskEntryRunsNothing(operation: StoreOperation) async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
         let runner = SlowExitCommandRunner()
         weak var weakStore: XcodeSweepStore?
         var task: Task<Void, Never>?
         do {
             let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+                xcodeRootURL: fixture.xcodeRootURL,
                 commandRunner: runner,
                 fileTrasher: RecordingFileTrasher()
             ))
             weakStore = store
             // The task can't start until this test suspends, so the store goes first.
-            task = store.startRefresh()
+            task = operation.start(on: store)
         }
 
+        #expect(task != nil)
         #expect(weakStore == nil)
         let result = try await awaitResult(of: Task { await task?.value }, within: .seconds(10))
         _ = try result.get()
         #expect(await runner.startedCount == 0)
     }
 
-    @Test("A cancelled operation does not keep its store alive", .timeLimit(.minutes(1)))
-    func cancelledOperationReleasesStore() async throws {
+    @Test(
+        "A cancelled operation does not keep its store alive once teardown ends",
+        .timeLimit(.minutes(1)),
+        arguments: StoreOperation.allCases
+    )
+    func cancelledOperationReleasesStore(operation: StoreOperation) async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
         let runner = SlowExitCommandRunner()
         weak var weakStore: XcodeSweepStore?
         var task: Task<Void, Never>?
         do {
             let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+                xcodeRootURL: fixture.xcodeRootURL,
                 commandRunner: runner,
                 fileTrasher: RecordingFileTrasher()
             ))
             weakStore = store
-            task = store.startRefresh()
-            try await waitUntil("simctl commands started") { await runner.startedCount == 2 }
+            task = operation.start(on: store)
+            try await waitUntil("commands started") { await runner.startedCount == operation.commandCount }
             store.cancelOperation()
         }
 
@@ -760,6 +775,34 @@ struct XcodeSweepStoreTests {
             await controller.resume(id: call.id, with: .success(
                 CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
             ))
+        }
+    }
+}
+
+/// The two operations the store runs, for tests that must cover both task paths.
+enum StoreOperation: CaseIterable, Sendable {
+    case scan
+    case simctlDeletion
+
+    /// simctl commands the operation starts: both list commands, or one delete.
+    var commandCount: Int {
+        switch self {
+        case .scan: 2
+        case .simctlDeletion: 1
+        }
+    }
+
+    @MainActor
+    func start(on store: XcodeSweepStore) -> Task<Void, Never>? {
+        switch self {
+        case .scan:
+            store.startRefresh()
+        case .simctlDeletion:
+            store.startDeletion(DeletionPlan(selection: [makeStorageItem(
+                id: "sim",
+                category: .simulatorDevices,
+                method: .simctlDevice(udid: "UDID-1", isBooted: false)
+            )]))
         }
     }
 }
