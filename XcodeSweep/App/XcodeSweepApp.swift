@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Chooses the app to run. As a test host it runs one with no windows, because the main window
-/// scans the real `~/Library/Developer` as soon as it appears.
+/// Chooses the app to run. As a test host it opens no main window, because that window scans the
+/// real `~/Library/Developer` as soon as it appears.
 @main
 enum XcodeSweepLauncher {
     static func main() {
