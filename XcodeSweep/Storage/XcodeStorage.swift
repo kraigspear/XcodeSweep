@@ -62,7 +62,7 @@ struct XcodeStorage: Sendable {
     /// during `next()`, child scan tasks are cancelled, full producer teardown is awaited, and
     /// `CancellationError` is thrown. Breaking out of iteration early requests producer
     /// cancellation on iterator release without awaiting teardown or throwing.
-    func scan() -> some AsyncSequence<ScanEvent, any Error> & Sendable {
+    func scan() -> some AsyncSequence<ScanEvent, CancellationError> & Sendable {
         StructuredScanStream(storage: self)
     }
 
@@ -75,7 +75,7 @@ struct XcodeStorage: Sendable {
     /// Cancellation is cooperative: once observed, no subsequent items are started and `CancellationError`
     /// is never recorded as a `DeletionFailure`; an in-flight `FileTrashing` move that cannot be interrupted
     /// may complete and emit its outcome before cancellation is thrown on the next pull.
-    func delete(_ plan: DeletionPlan) -> some AsyncSequence<DeletionEvent, any Error> & Sendable {
+    func delete(_ plan: DeletionPlan) -> some AsyncSequence<DeletionEvent, CancellationError> & Sendable {
         DeletionStream(storage: self, items: plan.deletableItems)
     }
 
@@ -192,6 +192,7 @@ private final class ScanProducerHandle: Sendable {
 /// waits for that task to finish.
 private struct StructuredScanStream: AsyncSequence, Sendable {
     typealias Element = ScanEvent
+    typealias Failure = CancellationError
 
     let storage: XcodeStorage
 
@@ -307,7 +308,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
             self.producer = producer
         }
 
-        mutating func next() async throws -> ScanEvent? {
+        mutating func next() async throws(CancellationError) -> ScanEvent? {
             if deliveredCompletion {
                 await producer.waitForExit()
                 return nil
@@ -340,7 +341,8 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                     await producer.waitForExit()
                 }
                 return event
-            } catch is CancellationError {
+            } catch {
+                // The producer only ever finishes the stream with `CancellationError`.
                 producer.cancel()
                 await producer.waitForExit()
                 throw CancellationError()
@@ -358,6 +360,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 /// The `delete(_:)` sequence: each `next()` call deletes at most one item.
 private struct DeletionStream: AsyncSequence, Sendable {
     typealias Element = DeletionEvent
+    typealias Failure = CancellationError
 
     let storage: XcodeStorage
     let items: [StorageItem]
@@ -392,7 +395,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
             )
         }
 
-        mutating func next() async throws -> DeletionEvent? {
+        mutating func next() async throws(CancellationError) -> DeletionEvent? {
             if Task.isCancelled {
                 phase = .done
                 throw CancellationError()

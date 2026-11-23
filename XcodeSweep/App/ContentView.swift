@@ -76,10 +76,6 @@ struct ContentView: View {
         } message: { report in
             Text(report.summary)
         }
-        .alert("Scan Error", item: $bindableStore.errorMessage) { _ in
-        } message: { message in
-            Text(message)
-        }
         .task {
             await store.refreshIfNeeded()
         }

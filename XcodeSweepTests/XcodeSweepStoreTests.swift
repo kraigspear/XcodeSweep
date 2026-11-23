@@ -267,7 +267,6 @@ struct XcodeSweepStoreTests {
         // Then: deterministic teardown guarantees no stray updates, no error, and unscanned state
         #expect(store.inventory.scannedAt == nil)
         #expect(!store.hasCompletedScan)
-        #expect(store.errorMessage == nil)
         #expect(store.scanWarnings.isEmpty)
         #expect(store.operation == .idle)
     }
@@ -474,7 +473,6 @@ struct XcodeSweepStoreTests {
 
         #expect(store.inventory == completedInventory)
         #expect(store.scanWarnings == completedWarnings)
-        #expect(store.errorMessage == nil)
         #expect(await controller.recordedArguments.count == 4)
 
         // A follow-up refresh after cancellation completes cleanly and picks up Added-2.
@@ -512,7 +510,6 @@ struct XcodeSweepStoreTests {
         try await controller.waitForCancellation(id: call2.id)
         #expect(store.operation == .idle)
         #expect(!store.hasCompletedScan)
-        #expect(store.errorMessage == nil)
     }
 
     @Test(
@@ -579,7 +576,6 @@ struct XcodeSweepStoreTests {
         #expect(report.wasCancelled)
         #expect(report.deletedCount == 1)
         #expect(report.failures.isEmpty)
-        #expect(store.errorMessage == nil)
         #expect(await trasher.trashedURLs == [firstURL])
         #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
     }
@@ -592,7 +588,6 @@ struct XcodeSweepStoreTests {
         store.cancelOperation()
 
         #expect(store.operation == .idle)
-        #expect(store.errorMessage == nil)
     }
 
     @Test("Rows hidden by search or filter are never part of the selection plan")
