@@ -27,7 +27,7 @@ struct XcodeStorageCancellationTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
-            deletionMethod: .simctlDevice(udid: "UDID-BOOTED", isBooted: true),
+            deletionMethod: .simctlDevice(udid: "UDID-BOOTED"),
             metadata: []
         )
         let trailingFile = StorageItem(
@@ -95,7 +95,7 @@ struct XcodeStorageCancellationTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
-            deletionMethod: .simctlDevice(udid: "UDID-BOOTED", isBooted: true),
+            deletionMethod: .simctlDevice(udid: "UDID-BOOTED"),
             metadata: []
         )
 

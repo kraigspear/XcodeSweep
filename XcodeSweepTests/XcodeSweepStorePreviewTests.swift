@@ -38,7 +38,7 @@
             defer { try? FileManager.default.removeItem(at: fileURL) }
             let plan = DeletionPlan(selection: [
                 makeStorageItem(id: "file", method: .trashFile(fileURL)),
-                makeStorageItem(id: "sim", method: .simctlDevice(udid: "PREVIEW-UDID", isBooted: false)),
+                makeStorageItem(id: "sim", method: .simctlDevice(udid: "PREVIEW-UDID")),
             ])
             let store = XcodeSweepStore.preview()
 

@@ -85,7 +85,7 @@ struct XcodeStorageDeletionTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
-            deletionMethod: .simctlDevice(udid: "UDID-1", isBooted: true),
+            deletionMethod: .simctlDevice(udid: "UDID-1"),
             metadata: []
         )
         let failingRuntime = StorageItem(
@@ -218,7 +218,7 @@ struct XcodeStorageDeletionTests {
             id: "sim-1",
             category: .simulatorDevices,
             status: .booted,
-            method: .simctlDevice(udid: "UDID-1", isBooted: true)
+            method: .simctlDevice(udid: "UDID-1")
         )
         let runtime = makeStorageItem(
             id: "rt-1",
@@ -236,5 +236,49 @@ struct XcodeStorageDeletionTests {
             ["simctl", "runtime", "delete", "RT-1"],
         ])
         #expect(calls.allSatisfy { $0.timeout == nil })
+    }
+
+    /// A simulator booted after the scan must still be shut down before a permanent delete.
+    /// To replicate: scan → boot a shut-down simulator in Simulator.app → delete it in XcodeSweep.
+    @Test("Shuts down every simulator before deleting it, whatever the scan saw")
+    func shutsDownDeviceNotBootedAtScanTime() async throws {
+        let runner = RecordingCommandRunner()
+        let storage = XcodeStorage(commandRunner: runner, fileTrasher: RecordingFileTrasher())
+        let shutDownAtScan = makeStorageItem(
+            id: "sim-2",
+            category: .simulatorDevices,
+            status: .active,
+            method: .simctlDevice(udid: "UDID-2")
+        )
+
+        for try await _ in storage.delete(DeletionPlan(selection: [shutDownAtScan])) {}
+
+        #expect(await runner.calls.map(\.arguments) == [
+            ["simctl", "shutdown", "UDID-2"],
+            ["simctl", "delete", "UDID-2"],
+        ])
+    }
+
+    /// To replicate: delete a shut-down simulator; `simctl shutdown` fails, and the delete still succeeds.
+    @Test("Deletes a simulator even when its shutdown fails because it is already shut down")
+    func deletesWhenShutdownFails() async throws {
+        let runner = RecordingCommandRunner(stub: StubCommandRunner(shutdownError: ProcessRunnerError.nonZeroExit(
+            command: "xcrun simctl shutdown UDID-3",
+            status: 149,
+            stderr: "Unable to shutdown device in current state: Shutdown"
+        )))
+        let storage = XcodeStorage(commandRunner: runner, fileTrasher: RecordingFileTrasher())
+        let device = makeStorageItem(id: "sim-3", category: .simulatorDevices, method: .simctlDevice(udid: "UDID-3"))
+
+        var report: DeletionReport?
+        for try await event in storage.delete(DeletionPlan(selection: [device])) {
+            if case let .completed(completed) = event {
+                report = completed
+            }
+        }
+
+        #expect(await runner.calls.map(\.arguments).last == ["simctl", "delete", "UDID-3"])
+        #expect(report?.simctlDeletedCount == 1)
+        #expect(report?.failures.isEmpty == true)
     }
 }

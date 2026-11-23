@@ -27,22 +27,23 @@ extension XcodeStorage {
 
     // MARK: - Deletion
 
-    /// Permanently deletes a simulator device, first trying to shut it down when `isBooted`.
-    func deleteSimulatorDevice(udid: String, isBooted: Bool) async throws {
-        if isBooted {
-            do {
-                _ = try await commandRunner.run(
-                    executableURL: Self.xcrunURL,
-                    arguments: ["simctl", "shutdown", udid],
-                    timeout: nil
-                )
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                // Best-effort shutdown: proceed to delete even if simulator is already shut down.
-            }
-            try Task.checkCancellation()
+    /// Permanently deletes a simulator device, trying to shut it down first.
+    ///
+    /// Tries every device rather than those booted at scan time: one may have booted since. A failed
+    /// shutdown doesn't stop the delete, which reports its own error if the device can't go.
+    func deleteSimulatorDevice(udid: String) async throws {
+        do {
+            _ = try await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: ["simctl", "shutdown", udid],
+                timeout: nil
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Fails when the device is already shut down; delete reports any real problem.
         }
+        try Task.checkCancellation()
         _ = try await commandRunner.run(
             executableURL: Self.xcrunURL,
             arguments: ["simctl", "delete", udid],
@@ -194,7 +195,7 @@ extension XcodeStorage {
                         path: deviceURL,
                         workspacePath: nil,
                         status: status,
-                        deletionMethod: .simctlDevice(udid: device.udid, isBooted: isBooted),
+                        deletionMethod: .simctlDevice(udid: device.udid),
                         metadata: metadata
                     )
                 )

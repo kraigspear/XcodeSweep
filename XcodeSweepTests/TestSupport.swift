@@ -173,8 +173,12 @@ struct StubCommandRunner: CommandRunning, Sendable {
     var runtimesJSON = #"{}"#
     var devicesError: (any Error)?
     var runtimesError: (any Error)?
+    var shutdownError: (any Error)?
 
     func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
+        if arguments.starts(with: ["simctl", "shutdown"]), let shutdownError {
+            throw shutdownError
+        }
         switch arguments {
         case ["simctl", "list", "devices", "-j"]:
             if let devicesError {
@@ -566,12 +570,21 @@ actor AsyncSignal {
 
 /// A runner whose commands stay in flight after cancellation until `finishExiting()`, as
 /// ProcessRunner does while a cancelled child exits; then each throws CancellationError.
+/// `simctl shutdown` returns at once, so a device deletion parks at its delete.
 actor SlowExitCommandRunner: CommandRunning {
-    private(set) var startedCount = 0
+    private(set) var parkedArguments: [[String]] = []
+
+    /// Commands parked so far.
+    var startedCount: Int {
+        parkedArguments.count
+    }
     private let exited = AsyncSignal()
 
-    func run(executableURL _: URL, arguments _: [String], timeout _: Duration?) async throws -> CommandOutput {
-        startedCount += 1
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
+        if arguments.starts(with: ["simctl", "shutdown"]) {
+            return CommandOutput(stdout: Data(), stderr: Data(), terminationStatus: 0)
+        }
+        parkedArguments.append(arguments)
         await exited.wait()
         try Task.checkCancellation()
         return CommandOutput(stdout: Data(#"{"devices":{}}"#.utf8), stderr: Data(), terminationStatus: 0)

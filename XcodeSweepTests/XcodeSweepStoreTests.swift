@@ -665,12 +665,13 @@ struct XcodeSweepStoreTests {
         let device = makeStorageItem(
             id: "sim",
             category: .simulatorDevices,
-            method: .simctlDevice(udid: "UDID-1", isBooted: false)
+            method: .simctlDevice(udid: "UDID-1")
         )
 
         // Given: a deletion whose simctl delete is in flight
         let deletion = store.startDeletion(DeletionPlan(selection: [device]))
         try await waitUntil("simctl delete started") { await runner.startedCount == 1 }
+        #expect(await runner.parkedArguments == [["simctl", "delete", "UDID-1"]])
 
         // When
         store.cancelOperation()
@@ -789,7 +790,7 @@ enum StoreOperation: CaseIterable, Sendable {
     case scan
     case simctlDeletion
 
-    /// simctl commands the operation starts: both list commands, or one delete.
+    /// Commands parked before cancellation: both list commands, or the device's delete.
     var commandCount: Int {
         switch self {
         case .scan: 2
@@ -806,7 +807,7 @@ enum StoreOperation: CaseIterable, Sendable {
             store.startDeletion(DeletionPlan(selection: [makeStorageItem(
                 id: "sim",
                 category: .simulatorDevices,
-                method: .simctlDevice(udid: "UDID-1", isBooted: false)
+                method: .simctlDevice(udid: "UDID-1")
             )]))
         }
     }

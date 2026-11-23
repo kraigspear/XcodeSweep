@@ -222,7 +222,7 @@ struct XcodeStorageScanTests {
         let devicesByName = Dictionary(uniqueKeysWithValues: devices.map { ($0.name, $0) })
         #expect(devicesByName["iPhone 17 Pro"]?.sizeBytes == 4_000_500_000)
         #expect(devicesByName["iPhone 17 Pro"]?.status == .booted)
-        #expect(devicesByName["iPhone 17 Pro"]?.deletionMethod == .simctlDevice(udid: "AAA", isBooted: true))
+        #expect(devicesByName["iPhone 17 Pro"]?.deletionMethod == .simctlDevice(udid: "AAA"))
         #expect(devicesByName["iPhone 15"]?.status == .unavailable)
         #expect(devicesByName["iPhone 15"]?.isReclaimable == true)
         #expect(devicesByName["iPhone 14 Stale"]?.status == .stale)

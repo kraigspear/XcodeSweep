@@ -5,7 +5,7 @@ enum DeletionMethod: Equatable, Hashable, Sendable {
     /// Moves the filesystem path to the user's Trash (reversible).
     case trashFile(URL)
     /// Deletes a simulator device via `xcrun simctl delete <udid>` (permanent).
-    case simctlDevice(udid: String, isBooted: Bool)
+    case simctlDevice(udid: String)
     /// Deletes a simulator runtime disk image via `xcrun simctl runtime delete <identifier>` (permanent).
     case simctlRuntime(identifier: String)
     /// Cannot be deleted (for example, a system-managed non-deletable runtime).

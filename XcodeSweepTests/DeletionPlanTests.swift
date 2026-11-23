@@ -8,10 +8,10 @@ struct DeletionPlanTests {
     /// To replicate: not reachable as one UI selection (selection is per category); covered at the model level.
     @Test("Mixed selection partitions deletable items from protected ones")
     func init_withMixedSelection_excludesProtectedItemsFromCountsAndBytes() {
-        // Given: A trash item, a booted device, a runtime, and a protected runtime
+        // Given: A trash item, a device, a runtime, and a protected runtime
         let selection = [
             makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd"))),
-            makeStorageItem(id: "sim", sizeBytes: 20, method: .simctlDevice(udid: "SIM-1", isBooted: true)),
+            makeStorageItem(id: "sim", sizeBytes: 20, method: .simctlDevice(udid: "SIM-1")),
             makeStorageItem(id: "rt", sizeBytes: 3, method: .simctlRuntime(identifier: "RT-1")),
             makeStorageItem(id: "sys", sizeBytes: 9000, method: .notDeletable(reason: "System")),
         ]
@@ -25,7 +25,7 @@ struct DeletionPlanTests {
         #expect(plan.totalBytes == 123)
         #expect(plan.trashCount == 1)
         #expect(plan.permanentCount == 2)
-        #expect(plan.bootedDeviceCount == 1)
+        #expect(plan.deviceCount == 1)
         #expect(!plan.isEmpty)
     }
 
@@ -60,20 +60,20 @@ struct DeletionPlanTests {
         #expect(plan.actionTitle == expected)
     }
 
-    /// Verifies the confirmation warns about permanent deletion and booted-simulator shutdown.
-    /// To replicate: select a booted simulator in Simulator Devices → press ⌘⌫ → read the dialog.
+    /// Verifies the confirmation warns about permanent deletion and simulator shutdown.
+    /// To replicate: select a simulator in Simulator Devices → press ⌘⌫ → read the dialog.
     @Test("Confirmation message describes every removal consequence")
-    func confirmationMessage_withTrashAndBootedDevice_describesEachConsequence() {
+    func confirmationMessage_withTrashAndDevice_describesEachConsequence() {
         let plan = DeletionPlan(selection: [
             makeStorageItem(id: "dd", method: .trashFile(URL(filePath: "/tmp/dd"))),
-            makeStorageItem(id: "sim", method: .simctlDevice(udid: "SIM-1", isBooted: true)),
+            makeStorageItem(id: "sim", method: .simctlDevice(udid: "SIM-1")),
         ])
 
         let message = plan.confirmationMessage
 
         #expect(message.contains("1 filesystem item will be moved to Trash"))
         #expect(message.contains("1 simulator item will be permanently deleted"))
-        #expect(message.contains("1 booted simulator will be shut down first"))
+        #expect(message.contains("XcodeSweep will try to shut the simulator down first."))
     }
 
     /// Verifies a trash-only confirmation does not warn about permanent deletion.
