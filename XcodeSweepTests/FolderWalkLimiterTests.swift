@@ -81,6 +81,25 @@ struct FolderWalkLimiterTests {
         _ = try await awaitResult(of: Task { try await limiter.acquire(in: lane) }, within: .seconds(5)).get()
     }
 
+    @Test("Cancelling one of a lane's waiters keeps the others queued", .timeLimit(.minutes(1)))
+    func cancellingOneWaiterKeepsItsLaneQueued() async throws {
+        let limiter = FolderWalkLimiter(width: 1)
+        let lane = limiter.makeLane()
+        try await limiter.acquire(in: lane)
+
+        let cancelled = Task { try await limiter.acquire(in: lane) }
+        try await waitUntil("first waiter queued") { limiter.waiterCount == 1 }
+        let survivor = Task { try await limiter.acquire(in: lane) }
+        try await waitUntil("second waiter queued") { limiter.waiterCount == 2 }
+
+        let waited = try await cancelAndAwaitResult(of: cancelled, within: .seconds(5))
+        #expect(throws: CancellationError.self) { try waited.get() }
+        #expect(limiter.waiterCount == 1)
+        limiter.release()
+        _ = try await awaitResult(of: survivor, within: .seconds(5)).get()
+        #expect(limiter.waiterCount == 0)
+    }
+
     /// Cancellation that lands before the caller queues runs its handler with nothing to remove.
     @Test("A caller cancelled before it waits throws instead of queueing", .timeLimit(.minutes(1)))
     func callerCancelledBeforeWaitingThrows() async throws {

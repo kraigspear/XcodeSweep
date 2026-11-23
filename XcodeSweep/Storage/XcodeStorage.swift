@@ -101,8 +101,8 @@ struct XcodeStorage: Sendable {
     /// Inspects `inputs` concurrently, as many at once as `limiter` allows in one lane of its own,
     /// returning the items found sorted largest first.
     ///
-    /// A child cancelled before its inspection starts skips its input, and an input whose `inspect`
-    /// throws contributes no item; the inspections here throw only on cancellation.
+    /// A child whose cancellation is seen before it holds a permit skips its input, and an input
+    /// whose `inspect` throws contributes no item; the inspections here throw only on cancellation.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
         limiter: FolderWalkLimiter,

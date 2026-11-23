@@ -77,8 +77,10 @@ final class FolderWalkLimiter: Sendable {
 
     /// Runs `body` once a permit is free; waiting doesn't hold a thread.
     ///
-    /// - Throws: `CancellationError`, without running `body`, if the task is cancelled before
-    ///   `body` starts; or whatever `body` throws.
+    /// Cancellation is checked until the permit is held: a cancel seen by then throws without running
+    /// `body`. One that lands later is left to `body`.
+    ///
+    /// - Throws: `CancellationError` from waiting, or whatever `body` throws.
     nonisolated(nonsending)
     func withPermit<T>(in lane: Lane, _ body: () throws(CancellationError) -> T) async throws(CancellationError) -> T {
         try await acquire(in: lane)
@@ -88,8 +90,8 @@ final class FolderWalkLimiter: Sendable {
 
     /// Takes a permit, waiting in `lane` while none is free; pair with `release()`.
     ///
-    /// - Throws: `CancellationError` if the task is cancelled before this returns; no permit is
-    ///   then held.
+    /// - Throws: `CancellationError` if cancellation is seen while waiting or once the permit is
+    ///   handed over; no permit is then held.
     nonisolated(nonsending)
     func acquire(in lane: Lane) async throws(CancellationError) {
         let id = state.withLock { $0.makeID() }
