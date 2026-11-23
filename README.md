@@ -6,7 +6,7 @@ A native macOS SwiftUI utility for inspecting and safely cleaning Xcode build an
 
 ## What It Scans
 
-- **DerivedData** (`~/Library/Developer/Xcode/DerivedData`) — project build folders, recognized by an `info.plist` or Xcode's `<Project>-<hash>` name. The `info.plist`'s workspace path identifies missing/orphaned workspaces and active Git worktrees, and last use determines whether other projects are unused; a hash-named folder without an `info.plist` is orphaned.
+- **DerivedData** (`~/Library/Developer/Xcode/DerivedData`) — project build folders, recognized by an `info.plist` or Xcode's `<Project>-<hash>` name. In a custom DerivedData folder, the `info.plist` must be Xcode's (it records the workspace path), and other folders that aren't Xcode's known shared caches are listed as unrecognized, protected, and not counted. The `info.plist`'s workspace path identifies missing/orphaned workspaces and active Git worktrees, and last use determines whether other projects are unused; a hash-named folder without an `info.plist` is orphaned.
 - **Simulator Devices** (`xcrun simctl list devices -j`) — shows allocated data + log size, runtime, boot state, and unavailable simulators.
 - **Simulator Runtimes** (`xcrun simctl runtime list -j`) — lists installed iOS/watchOS/tvOS/visionOS disk images, build numbers, sizes, and last-used timestamps.
 - **Device Support** (`~/Library/Developer/Xcode/* DeviceSupport`) — cached physical device symbols.

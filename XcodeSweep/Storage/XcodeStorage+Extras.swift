@@ -157,10 +157,29 @@ extension XcodeStorage {
 
     /// The module cache keeps its long-standing Unused status. Other folders aren't recommended:
     /// most are build caches, and clearing one can slow the builds that use it. In a custom
-    /// DerivedData folder an unknown one may not be Xcode's at all, so it is protected.
+    /// DerivedData folder an unknown one may not be Xcode's at all, so it is protected, and left
+    /// unmeasured so it can't count as Xcode storage.
     private static func inspectSharedCache(at url: URL, inCustomFolder: Bool) throws(CancellationError) -> StorageItem {
         let isModuleCache = url.lastPathComponent == moduleCacheFolderName
         let isTrusted = !inCustomFolder || knownSharedCacheNames.contains(url.lastPathComponent)
+        guard isTrusted else {
+            return StorageItem(
+                id: "unrecognized:\(url.path)",
+                category: .archivesAndCaches,
+                name: url.lastPathComponent,
+                subtitle: "Not recognized as Xcode's; left alone and not counted",
+                sizeBytes: 0,
+                lastUsedDate: modificationDate(of: url),
+                path: url,
+                workspacePath: nil,
+                status: .active,
+                deletionMethod: .notDeletable(reason: "Not recognized as Xcode's, in a custom DerivedData folder that may hold other files"),
+                metadata: [
+                    MetadataEntry(key: "Type", value: "Unrecognized Folder"),
+                    MetadataEntry(key: "Path", value: url.path),
+                ]
+            )
+        }
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
@@ -173,9 +192,7 @@ extension XcodeStorage {
             path: url,
             workspacePath: nil,
             status: isModuleCache ? .stale : .active,
-            deletionMethod: isTrusted
-                ? .trashFile(url)
-                : .notDeletable(reason: "Not recognized as Xcode's, in a custom DerivedData folder that may hold other files"),
+            deletionMethod: .trashFile(url),
             metadata: [
                 MetadataEntry(key: "Type", value: isModuleCache ? "Xcode Build Cache" : "DerivedData Folder"),
                 MetadataEntry(key: "Path", value: url.path),

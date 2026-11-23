@@ -9,11 +9,13 @@ extension XcodeStorage {
         }
     }
 
-    /// DerivedData's folders, split into per-project build folders and caches Xcode shares across
-    /// projects, such as `ModuleCache.noindex` and `SDKExplicitPrecompiledModules`.
+    /// DerivedData's folders, split into per-project build folders and everything else: caches Xcode
+    /// shares across projects, such as `ModuleCache.noindex`, and, in a custom folder, folders that
+    /// may not be Xcode's at all.
     ///
-    /// A project folder has an `info.plist`, or is named `<Project>-<28 lowercase letters>` and has
-    /// lost it. Anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
+    /// A project folder is named `<Project>-<28 lowercase letters>`, or has an `info.plist`; in a
+    /// custom folder that plist must be Xcode's, recording a `WorkspacePath`. In the default folder
+    /// anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
     func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
         let derivedDataURL = xcodeLocations.derivedDataURL
         let isCustom = xcodeLocations.hasCustomDerivedData

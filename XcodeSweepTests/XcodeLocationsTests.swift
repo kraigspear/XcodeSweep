@@ -91,9 +91,9 @@ struct XcodeLocationsTests {
         let xcodePlist: [String: Any] = ["WorkspacePath": "/nonexistent/Recorded.xcodeproj", "LastAccessedDate": now]
         try PropertyListSerialization.data(fromPropertyList: xcodePlist, format: .xml, options: 0)
             .write(to: recorded.appendingPathComponent("info.plist"))
-        // An app's Info.plist, which a case-insensitive volume also finds as info.plist.
+        // A plist at the very path Xcode uses, so only its contents can disqualify it on any volume.
         try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.example.repo"], format: .xml, options: 0)
-            .write(to: repository.appendingPathComponent("Info.plist"))
+            .write(to: repository.appendingPathComponent("info.plist"))
         let storage = XcodeStorage(
             xcodeLocations: XcodeLocations(xcodeRootURL: fixture.xcodeRootURL, derivedDataURL: custom),
             commandRunner: StubCommandRunner(),
@@ -107,7 +107,13 @@ struct XcodeLocationsTests {
 
         let deletablePaths = Set(plan.deletableItems.compactMap(\.path).map(\.standardizedFileURL.path))
         #expect(deletablePaths == Set([project, recorded, moduleCache].map(\.standardizedFileURL.path)))
-        #expect(everything.contains { $0.path?.standardizedFileURL == repository.standardizedFileURL && !$0.isDeletable })
-        #expect(everything.contains { $0.path?.standardizedFileURL == unrelated.standardizedFileURL && !$0.isDeletable })
+        // Listed, protected, and unmeasured, so they can't inflate Xcode's totals.
+        for folder in [repository, unrelated] {
+            let item = try #require(everything.first { $0.path?.standardizedFileURL == folder.standardizedFileURL })
+            #expect(!item.isDeletable)
+            #expect(item.sizeBytes == 0)
+        }
+        let xcodeBytes = everything.filter(\.isDeletable).reduce(0) { $0 + $1.sizeBytes }
+        #expect(StorageInventory(snapshot: snapshot).totalBytes == xcodeBytes)
     }
 }
