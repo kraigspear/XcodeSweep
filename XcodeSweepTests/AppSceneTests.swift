@@ -14,6 +14,13 @@ struct AppSceneTests {
         #expect(!sceneType.contains("WindowGroup"))
     }
 
+    /// The main window's first appearance scans the real `~/Library/Developer`, which a test run must not touch.
+    @Test("Running as the test host opens no main window")
+    func testHostOpensNoMainWindow() {
+        let mainWindows = NSApplication.shared.windows.filter { $0.identifier?.rawValue == "main" }
+        #expect(mainWindows.isEmpty)
+    }
+
     /// Reads the rendered pixels, since SwiftUI exposes no view tree to inspect and the footer
     /// once showed a hard-coded name.
     @Test("The sidebar footer shows the scanned volume's name")
