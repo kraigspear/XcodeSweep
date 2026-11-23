@@ -3,7 +3,18 @@ import Foundation
 extension XcodeStorage {
     static let moduleCacheFolderName = "ModuleCache.noindex"
 
-    func scanDerivedData(now: Date) async -> [StorageItem] {
+    func scanDerivedData(_ projectFolders: [URL], now: Date) async -> [StorageItem] {
+        await Self.scanConcurrently(projectFolders) { folderURL in
+            try Self.inspectDerivedDataFolder(at: folderURL, now: now)
+        }
+    }
+
+    /// DerivedData's folders, split into per-project build folders and caches Xcode shares across
+    /// projects, such as `ModuleCache.noindex` and `SDKExplicitPrecompiledModules`.
+    ///
+    /// A project folder has an `info.plist`, or is named `<Project>-<28 lowercase letters>` and has
+    /// lost it. Anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
+    func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
         let derivedDataURL = xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true)
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
@@ -11,17 +22,25 @@ extension XcodeStorage {
             includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return []
+            return ([], [])
         }
 
-        let candidates = entries.filter { url in
-            guard url.lastPathComponent != Self.moduleCacheFolderName else { return false }
-            return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        let folders = entries.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
-
-        return await Self.scanConcurrently(candidates) { folderURL in
-            try Self.inspectDerivedDataFolder(at: folderURL, now: now)
+        // One check per folder, so a plist appearing mid-classification can't put it in both lists or neither.
+        var projects: [URL] = []
+        var sharedCaches: [URL] = []
+        for folder in folders {
+            let isProject = fileManager.fileExists(atPath: folder.appendingPathComponent("info.plist").path)
+                || folder.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
+            if isProject {
+                projects.append(folder)
+            } else {
+                sharedCaches.append(folder)
+            }
         }
+        return (projects, sharedCaches)
     }
 
     // MARK: - Private Inspection

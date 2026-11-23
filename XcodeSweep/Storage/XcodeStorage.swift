@@ -210,6 +210,8 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 
                 let volume = storage.readVolume()
                 let referenceDate = storage.now()
+                // Classified once, so a folder Xcode is creating mid-scan lands in exactly one category.
+                let derivedData = storage.derivedDataFolders()
 
                 let snapshot = await withTaskGroup(
                     of: (StorageCategory, [StorageItem], String?)?.self,
@@ -217,7 +219,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                 ) { group in
                     group.addTask {
                         guard !Task.isCancelled else { return nil }
-                        let items = await storage.scanDerivedData(now: referenceDate)
+                        let items = await storage.scanDerivedData(derivedData.projects, now: referenceDate)
                         guard !Task.isCancelled else { return nil }
                         return (.derivedData, items, nil)
                     }
@@ -260,7 +262,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 
                     group.addTask {
                         guard !Task.isCancelled,
-                              let items = try? await storage.scanArchivesAndCaches(),
+                              let items = try? await storage.scanArchivesAndCaches(sharedCaches: derivedData.sharedCaches),
                               !Task.isCancelled
                         else { return nil }
                         return (.archivesAndCaches, items, nil)
