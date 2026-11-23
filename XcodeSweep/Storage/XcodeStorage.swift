@@ -197,15 +197,16 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
     let storage: XcodeStorage
 
     struct AsyncIterator: AsyncIteratorProtocol {
-        private var base: AsyncThrowingStream<ScanEvent, any Error>.AsyncIterator
+        private var base: AsyncStream<ScanEvent>.AsyncIterator
         private let producer: ScanProducerHandle
         private var deliveredCompletion = false
 
         init(storage: XcodeStorage) {
-            let (stream, continuation) = AsyncThrowingStream<ScanEvent, any Error>.makeStream()
+            // Not throwing: the producer ends early only when cancelled, which `next()` reports.
+            let (stream, continuation) = AsyncStream<ScanEvent>.makeStream()
             let task = Task.detached(priority: .userInitiated) {
                 if Task.isCancelled {
-                    continuation.finish(throwing: CancellationError())
+                    continuation.finish()
                     return
                 }
 
@@ -291,12 +292,10 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                     )
                 }
 
-                if Task.isCancelled {
-                    continuation.finish(throwing: CancellationError())
-                } else {
+                if !Task.isCancelled {
                     continuation.yield(.completed(snapshot))
-                    continuation.finish()
                 }
+                continuation.finish()
             }
 
             let producer = ScanProducerHandle(task: task)
@@ -321,32 +320,26 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
             }
 
             let producer = self.producer
-            do {
-                let event = try await withTaskCancellationHandler {
-                    try await base.next()
-                } onCancel: {
-                    producer.cancel()
-                }
+            let event = await withTaskCancellationHandler {
+                await base.next()
+            } onCancel: {
+                producer.cancel()
+            }
 
-                if Task.isCancelled {
-                    producer.cancel()
-                    await producer.waitForExit()
-                    throw CancellationError()
-                }
-
-                if case .completed = event {
-                    deliveredCompletion = true
-                }
-                if event == nil {
-                    await producer.waitForExit()
-                }
-                return event
-            } catch {
-                // The producer only ever finishes the stream with `CancellationError`.
+            if Task.isCancelled {
                 producer.cancel()
                 await producer.waitForExit()
                 throw CancellationError()
             }
+            guard let event else {
+                // The stream ends before `.completed` only when the producer was cancelled.
+                await producer.waitForExit()
+                throw CancellationError()
+            }
+            if case .completed = event {
+                deliveredCompletion = true
+            }
+            return event
         }
     }
 
