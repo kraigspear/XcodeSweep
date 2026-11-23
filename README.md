@@ -19,6 +19,7 @@ XcodeSweep scans at launch. When you return to it, it rescans if the last comple
 
 - Filesystem items (`DerivedData`, `DeviceSupport`, `Previews`, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible.
 - Simulator devices and runtime disk images are removed through **`xcrun simctl`** after explicit confirmation (XcodeSweep tries to shut each simulator down first).
+- Every removal, failure, and item stopped mid-removal is recorded in the unified log: `log show --last 1d --info --predicate 'subsystem == "com.kraigspear.XcodeSweep"'`.
 - App Sandbox is intentionally disabled (`com.apple.security.app-sandbox = false`) so the app can inspect `~/Library/Developer/` and invoke `/usr/bin/xcrun simctl`.
 
 ## Requirements

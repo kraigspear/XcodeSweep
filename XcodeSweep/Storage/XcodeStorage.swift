@@ -166,6 +166,29 @@ struct XcodeStorage: Sendable {
     }
 }
 
+// MARK: - Deletion Logging
+
+private extension DeletionMethod {
+    var logName: String {
+        switch self {
+        case .trashFile: "trash"
+        case .simctlDevice: "simctlDevice"
+        case .simctlRuntime: "simctlRuntime"
+        case .notDeletable: "none"
+        }
+    }
+
+    /// The path, device UDID, or runtime identifier being removed.
+    var logTarget: String {
+        switch self {
+        case let .trashFile(url): url.path
+        case let .simctlDevice(udid): udid
+        case let .simctlRuntime(identifier): identifier
+        case .notDeletable: ""
+        }
+    }
+}
+
 // MARK: - Private Structured Scan Stream
 
 private final class ScanProducerHandle: Sendable {
@@ -370,6 +393,11 @@ private struct DeletionStream: AsyncSequence, Sendable {
             case done
         }
 
+        /// Targets and reasons are public: the log is the user's record of what left their own
+        /// developer folders, and redacted entries couldn't serve as one. Nothing logs below notice,
+        /// the lowest level the system keeps on disk by default.
+        private static let logger = LogContext.deletion.logger
+
         private let storage: XcodeStorage
         private let items: [StorageItem]
         private var phase: Phase
@@ -419,13 +447,27 @@ private struct DeletionStream: AsyncSequence, Sendable {
 
                 do {
                     try await storage.remove(item)
+                    Self.logger.notice("""
+                    outcome=removed method=\(item.deletionMethod.logName, privacy: .public) \
+                    bytes=\(item.sizeBytes, privacy: .public) target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
                     removed.append(item)
                     reclaimedBytes += item.sizeBytes
                     return .deleted(itemID: item.id, progress: progress(completing: index))
                 } catch is CancellationError {
+                    // A stopped trash move or simctl command may still have taken effect.
+                    Self.logger.notice("""
+                    outcome=unknown method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
                     phase = .done
                     throw CancellationError()
                 } catch {
+                    Self.logger.error("""
+                    outcome=failed method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public) \
+                    reason=\(error.localizedDescription, privacy: .public)
+                    """)
                     let failure = DeletionFailure(
                         itemID: item.id,
                         itemName: item.name,
