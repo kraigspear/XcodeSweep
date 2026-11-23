@@ -35,7 +35,7 @@ struct XcodeStorage: Sendable {
     static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
 
     /// Where the scanned folders are.
-    let locations: XcodeLocations
+    let xcodeLocations: XcodeLocations
     let commandRunner: any CommandRunning
     let fileTrasher: any FileTrashing
     /// The clock that stamps scans and ages items.
@@ -45,12 +45,12 @@ struct XcodeStorage: Sendable {
     let folderWalkLimiter = FolderWalkLimiter(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
 
     init(
-        locations: XcodeLocations = .current(),
+        xcodeLocations: XcodeLocations = .current(),
         commandRunner: any CommandRunning = ProcessRunner(),
         fileTrasher: any FileTrashing = LiveFileTrasher(),
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.locations = locations
+        self.xcodeLocations = xcodeLocations
         self.commandRunner = commandRunner
         self.fileTrasher = fileTrasher
         self.now = now
@@ -66,7 +66,7 @@ struct XcodeStorage: Sendable {
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.init(
-            locations: XcodeLocations(xcodeRootURL: xcodeRootURL),
+            xcodeLocations: XcodeLocations(xcodeRootURL: xcodeRootURL),
             commandRunner: commandRunner,
             fileTrasher: fileTrasher,
             now: now
@@ -75,7 +75,7 @@ struct XcodeStorage: Sendable {
 
     /// The Xcode data folder, `~/Library/Developer/Xcode` for the real Xcode.
     var xcodeRootURL: URL {
-        locations.xcodeRootURL
+        xcodeLocations.xcodeRootURL
     }
 
     // MARK: - Scanning

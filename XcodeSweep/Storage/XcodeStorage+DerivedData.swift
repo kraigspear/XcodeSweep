@@ -15,7 +15,8 @@ extension XcodeStorage {
     /// A project folder has an `info.plist`, or is named `<Project>-<28 lowercase letters>` and has
     /// lost it. Anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
     func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
-        let derivedDataURL = locations.derivedDataURL
+        let derivedDataURL = xcodeLocations.derivedDataURL
+        let isCustom = xcodeLocations.hasCustomDerivedData
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
             at: derivedDataURL,
@@ -32,8 +33,13 @@ extension XcodeStorage {
         var projects: [URL] = []
         var sharedCaches: [URL] = []
         for folder in folders {
-            let isProject = fileManager.fileExists(atPath: folder.appendingPathComponent("info.plist").path)
-                || folder.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
+            let plistURL = folder.appendingPathComponent("info.plist")
+            // A custom folder may hold anything, such as a repository with its own Info.plist, so
+            // there only Xcode's own plist, which records the workspace, counts.
+            let hasXcodePlist = isCustom
+                ? Self.loadPlist(at: plistURL)?["WorkspacePath"] is String
+                : fileManager.fileExists(atPath: plistURL.path)
+            let isProject = hasXcodePlist || folder.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
             if isProject {
                 projects.append(folder)
             } else {

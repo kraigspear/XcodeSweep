@@ -113,14 +113,15 @@ extension XcodeStorage {
 
         // 1. Caches Xcode shares across projects in DerivedData
         let lane = folderWalkLimiter.makeLane()
+        let isCustom = xcodeLocations.hasCustomDerivedData
         for cacheURL in sharedCaches {
             try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
-                try Self.inspectSharedCache(at: cacheURL)
+                try Self.inspectSharedCache(at: cacheURL, inCustomFolder: isCustom)
             })
         }
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
-        let archivesURL = locations.archivesURL
+        let archivesURL = xcodeLocations.archivesURL
         if let dateFolders = try? fileManager.contentsOfDirectory(
             at: archivesURL,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -151,10 +152,15 @@ extension XcodeStorage {
 
     // MARK: - Private Inspection
 
+    /// Caches Xcode is known to create in DerivedData; in a custom folder, only these may be removed.
+    private static let knownSharedCacheNames: Set<String> = [moduleCacheFolderName, "SDKExplicitPrecompiledModules"]
+
     /// The module cache keeps its long-standing Unused status. Other folders aren't recommended:
-    /// most are build caches, and clearing one can slow the builds that use it.
-    private static func inspectSharedCache(at url: URL) throws(CancellationError) -> StorageItem {
+    /// most are build caches, and clearing one can slow the builds that use it. In a custom
+    /// DerivedData folder an unknown one may not be Xcode's at all, so it is protected.
+    private static func inspectSharedCache(at url: URL, inCustomFolder: Bool) throws(CancellationError) -> StorageItem {
         let isModuleCache = url.lastPathComponent == moduleCacheFolderName
+        let isTrusted = !inCustomFolder || knownSharedCacheNames.contains(url.lastPathComponent)
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
@@ -167,7 +173,9 @@ extension XcodeStorage {
             path: url,
             workspacePath: nil,
             status: isModuleCache ? .stale : .active,
-            deletionMethod: .trashFile(url),
+            deletionMethod: isTrusted
+                ? .trashFile(url)
+                : .notDeletable(reason: "Not recognized as Xcode's, in a custom DerivedData folder that may hold other files"),
             metadata: [
                 MetadataEntry(key: "Type", value: isModuleCache ? "Xcode Build Cache" : "DerivedData Folder"),
                 MetadataEntry(key: "Path", value: url.path),

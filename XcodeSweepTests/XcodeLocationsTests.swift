@@ -7,8 +7,8 @@ struct XcodeLocationsTests {
     private let xcodeRoot = URL(filePath: "/Users/test/Library/Developer/Xcode", directoryHint: .isDirectory)
 
     @Test("Without custom locations, DerivedData and Archives sit in the Xcode folder")
-    func defaultsSitInXcodeFolder() throws {
-        let locations = try XcodeLocations(xcodeRootURL: xcodeRoot, settings: emptySettings())
+    func defaultsSitInXcodeFolder() {
+        let locations = XcodeLocations(xcodeRootURL: xcodeRoot, settings: [:])
 
         #expect(locations.derivedDataURL.path == "/Users/test/Library/Developer/Xcode/DerivedData")
         #expect(locations.archivesURL.path == "/Users/test/Library/Developer/Xcode/Archives")
@@ -16,10 +16,11 @@ struct XcodeLocationsTests {
 
     /// To replicate: Xcode Settings → Locations → set DerivedData and Archives to Custom → scan.
     @Test("Absolute custom locations from Xcode's settings are used")
-    func absoluteCustomLocationsAreUsed() throws {
-        let settings = try emptySettings()
-        settings.set("/Volumes/Fast/DerivedData", forKey: "IDECustomDerivedDataLocation")
-        settings.set("~/Archives", forKey: "IDECustomDistributionArchivesLocation")
+    func absoluteCustomLocationsAreUsed() {
+        let settings = [
+            "IDECustomDerivedDataLocation": "/Volumes/Fast/DerivedData",
+            "IDECustomDistributionArchivesLocation": "~/Archives",
+        ]
 
         let locations = XcodeLocations(xcodeRootURL: xcodeRoot, settings: settings)
 
@@ -29,10 +30,8 @@ struct XcodeLocationsTests {
 
     /// A workspace-relative location puts DerivedData beside each workspace, so there is no one folder to scan.
     @Test("A relative or empty custom location falls back to the Xcode folder")
-    func relativeCustomLocationFallsBack() throws {
-        let settings = try emptySettings()
-        settings.set("DerivedData", forKey: "IDECustomDerivedDataLocation")
-        settings.set("", forKey: "IDECustomDistributionArchivesLocation")
+    func relativeCustomLocationFallsBack() {
+        let settings = ["IDECustomDerivedDataLocation": "DerivedData", "IDECustomDistributionArchivesLocation": ""]
 
         let locations = XcodeLocations(xcodeRootURL: xcodeRoot, settings: settings)
 
@@ -55,7 +54,7 @@ struct XcodeLocationsTests {
         )
         _ = try fixture.addDerivedData(folderName: "Default-abcdefghijklmnopqrstuvwxyzab", workspacePath: nil, lastAccessed: now)
         let storage = XcodeStorage(
-            locations: XcodeLocations(
+            xcodeLocations: XcodeLocations(
                 xcodeRootURL: fixture.xcodeRootURL,
                 derivedDataURL: movedFixture.xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true),
                 archivesURL: movedFixture.xcodeRootURL.appendingPathComponent("Archives", isDirectory: true)
@@ -71,7 +70,44 @@ struct XcodeLocationsTests {
         #expect(snapshot.itemsByCategory[.archivesAndCaches]?.map(\.name) == ["MovedApp"])
     }
 
-    private func emptySettings() throws -> UserDefaults {
-        try #require(UserDefaults(suiteName: "XcodeSweepTests-\(UUID().uuidString)"))
+
+    /// A custom DerivedData folder may also hold a repository or other folders; only Xcode's own
+    /// artifacts there may be offered for cleanup.
+    @Test("In a custom DerivedData folder, only Xcode's artifacts can be deleted")
+    func customDerivedDataProtectsUnrecognizedFolders() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let custom = fixture.rootURL.appendingPathComponent("CustomDerivedData", isDirectory: true)
+        let project = custom.appendingPathComponent("App-abcdefghijklmnopqrstuvwxyzab", isDirectory: true)
+        let recorded = custom.appendingPathComponent("Recorded", isDirectory: true)
+        let moduleCache = custom.appendingPathComponent("ModuleCache.noindex", isDirectory: true)
+        let repository = custom.appendingPathComponent("MyRepo", isDirectory: true)
+        let unrelated = custom.appendingPathComponent("Notes", isDirectory: true)
+        for folder in [project, recorded, moduleCache, repository, unrelated] {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 64).write(to: folder.appendingPathComponent("file.bin"))
+        }
+        let xcodePlist: [String: Any] = ["WorkspacePath": "/nonexistent/Recorded.xcodeproj", "LastAccessedDate": now]
+        try PropertyListSerialization.data(fromPropertyList: xcodePlist, format: .xml, options: 0)
+            .write(to: recorded.appendingPathComponent("info.plist"))
+        // An app's Info.plist, which a case-insensitive volume also finds as info.plist.
+        try PropertyListSerialization.data(fromPropertyList: ["CFBundleIdentifier": "com.example.repo"], format: .xml, options: 0)
+            .write(to: repository.appendingPathComponent("Info.plist"))
+        let storage = XcodeStorage(
+            xcodeLocations: XcodeLocations(xcodeRootURL: fixture.xcodeRootURL, derivedDataURL: custom),
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let everything = snapshot.itemsByCategory.values.flatMap(\.self)
+        let plan = DeletionPlan(selection: everything)
+
+        let deletablePaths = Set(plan.deletableItems.compactMap(\.path).map(\.standardizedFileURL.path))
+        #expect(deletablePaths == Set([project, recorded, moduleCache].map(\.standardizedFileURL.path)))
+        #expect(everything.contains { $0.path?.standardizedFileURL == repository.standardizedFileURL && !$0.isDeletable })
+        #expect(everything.contains { $0.path?.standardizedFileURL == unrelated.standardizedFileURL && !$0.isDeletable })
     }
 }
