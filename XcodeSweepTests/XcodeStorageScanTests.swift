@@ -486,16 +486,18 @@ struct XcodeStorageScanTests {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
         let now = testISO8601Date("2026-11-21T10:00:00Z")
-        // A lowercase folder for an uppercase simctl UDID: one device, so one row.
+        // A lowercase folder that simctl spells in uppercase: on this case-insensitive volume, one
+        // folder and one device, so one row.
         let registeredURL = try fixture.addPreviewDevice(
             udid: "abcdef01-reg1", name: "iPhone 18 Pro", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
         )
         let leftoverURL = try fixture.addPreviewDevice(
             udid: "LEFTOVER-1", name: "iPhone 17", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-2", modifiedDate: now
         )
+        let registeredAlias = registeredURL.deletingLastPathComponent().appendingPathComponent("ABCDEF01-REG1")
         let previewJSON = """
         {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
-          "dataPath":"\(registeredURL.path)/data","dataPathSize":2000,"logPathSize":500,
+          "dataPath":"\(registeredAlias.path)/data","dataPathSize":2000,"logPathSize":500,
           "udid":"ABCDEF01-REG1","lastUsedAt":"2026-09-01T00:00:00Z","isAvailable":true,"state":"Shutdown","name":"iPhone 18 Pro"
         }]}}
         """
@@ -567,5 +569,62 @@ struct XcodeStorageScanTests {
         #expect(snapshot.itemsByCategory[.previews] == [])
         #expect(snapshot.warnings.isEmpty)
         #expect(await !runner.calls.contains { $0.arguments.contains("previews") })
+    }
+
+    /// On a case-sensitive volume a folder spelled differently from simctl's UDID is a different
+    /// folder; only the one simctl's data path names is the registered device.
+    @Test("A preview folder simctl's data path doesn't name is a leftover, even with the same UDID")
+    func sameUDIDDifferentFolderIsLeftover() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let setFolder = try fixture.addPreviewDevice(
+            udid: "abcdef01-copy", name: "Copy", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        let registeredFolder = fixture.rootURL.appendingPathComponent("Elsewhere/ABCDEF01-COPY", isDirectory: true)
+        try FileManager.default.createDirectory(at: registeredFolder, withIntermediateDirectories: true)
+        let previewJSON = """
+        {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
+          "dataPath":"\(registeredFolder.path)/data","udid":"ABCDEF01-COPY","isAvailable":true,"state":"Shutdown","name":"Registered"
+        }]}}
+        """
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(previewDevicesJSON: previewJSON),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let previews = try #require(try await finalScanSnapshot(from: storage).itemsByCategory[.previews])
+
+        #expect(previews.map(\.name).sorted() == ["Copy", "Registered"])
+        #expect(previews.first { $0.name == "Copy" }?.deletionMethod == .trashFile(setFolder))
+    }
+
+    /// Without a data path there is no folder to compare, so a folder named like the device is kept.
+    @Test("A preview folder named like a registered device with no data path is protected")
+    func unlocatedRegisteredDeviceProtectsItsFolder() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        try fixture.addPreviewDevice(
+            udid: "abcdef01-nopath", name: "Folder", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        let previewJSON = """
+        {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
+          "udid":"ABCDEF01-NOPATH","isAvailable":true,"state":"Shutdown","name":"Registered"
+        }]}}
+        """
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(previewDevicesJSON: previewJSON),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let previews = try #require(try await finalScanSnapshot(from: storage).itemsByCategory[.previews])
+
+        #expect(previews.first { $0.name == "Folder" }?.isDeletable == false)
+        #expect(previews.first { $0.name == "Registered" }?.isDeletable == true)
     }
 }

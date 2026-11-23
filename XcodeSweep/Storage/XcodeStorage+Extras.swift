@@ -85,14 +85,25 @@ extension XcodeStorage {
             warning = error is CancellationError ? nil : "SwiftUI Previews: \(error.localizedDescription)"
         }
 
-        // Uppercased: the volume ignores case, so a folder and simctl may spell one UDID differently.
-        let registeredUDIDs = Set((registered ?? []).compactMap { item -> String? in
-            if case let .simctlDevice(udid, _) = item.deletionMethod { udid.uppercased() } else { nil }
-        })
-        let leftovers = directories.filter { !registeredUDIDs.contains($0.lastPathComponent.uppercased()) }
-        let canTrashLeftovers = registered != nil
+        // Matched by file identity: a folder may spell its UDID in another case than simctl, and on a
+        // case-sensitive volume two such spellings are distinct folders.
+        var registeredFolders: Set<FileIdentity> = []
+        var unlocatedUDIDs: Set<String> = []
+        for item in registered ?? [] {
+            if let folder = item.path, let identity = FileIdentity(of: folder) {
+                registeredFolders.insert(identity)
+            } else if case let .simctlDevice(udid, _) = item.deletionMethod {
+                unlocatedUDIDs.insert(udid.uppercased())
+            }
+        }
+        let leftovers = directories.filter { url in
+            FileIdentity(of: url).map { !registeredFolders.contains($0) } ?? true
+        }
+        let protectedUDIDs = unlocatedUDIDs
 
         let leftoverItems = await Self.scanConcurrently(leftovers, limiter: folderWalkLimiter) { url in
+            // Without simctl's list, or its path for a device of this name, the folder may be registered.
+            let canTrash = registered != nil && !protectedUDIDs.contains(url.lastPathComponent.uppercased())
             let size = try DirectorySizer.allocatedSize(of: url)
             let modified = Self.modificationDate(of: url)
             let plist = Self.loadPlist(at: url.appendingPathComponent("device.plist"))
@@ -120,7 +131,7 @@ extension XcodeStorage {
                 path: url,
                 workspacePath: nil,
                 status: status,
-                deletionMethod: canTrashLeftovers
+                deletionMethod: canTrash
                     ? .trashFile(url)
                     : .notDeletable(reason: "simctl couldn't confirm this folder isn't a registered preview device"),
                 metadata: metadata
@@ -242,5 +253,27 @@ extension XcodeStorage {
             deletionMethod: .trashFile(url),
             metadata: metadata
         )
+    }
+}
+
+/// A file's volume and inode, equal for every path that reaches it.
+private struct FileIdentity: Hashable {
+    let device: dev_t
+    let inode: ino_t
+
+    init?(of url: URL) {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        device = info.st_dev
+        inode = info.st_ino
+    }
+
+    static func == (lhs: FileIdentity, rhs: FileIdentity) -> Bool {
+        lhs.device == rhs.device && lhs.inode == rhs.inode
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(device)
+        hasher.combine(inode)
     }
 }
