@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import XcodeSweep
 
@@ -43,7 +44,7 @@ struct XcodeSweepStoreTests {
         }
         """
 
-        let trasher = RecordingFileTrasher()
+        let trasher = RecordingFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(devicesJSON: devicesJSON),
@@ -113,7 +114,7 @@ struct XcodeSweepStoreTests {
             payloadBytes: 16384
         )
 
-        let trasher = RecordingFileTrasher(failingURLs: [secondURL])
+        let trasher = RecordingFileTrasher(failingURLs: [secondURL], removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -166,7 +167,7 @@ struct XcodeSweepStoreTests {
             payloadBytes: 65536
         )
 
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -250,7 +251,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
@@ -280,7 +281,7 @@ struct XcodeSweepStoreTests {
         defer { fixture.cleanup() }
 
         let controller = ControllableCommandRunner()
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
@@ -329,6 +330,8 @@ struct XcodeSweepStoreTests {
         #expect(await !controller.hasParkedCall)
 
         await trasher.resume(id: trashCall.id)
+        // The deletion's rescan runs next.
+        try await answerSimctl(controller)
         await deleteTask?.value
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .derivedData).isEmpty)
@@ -416,7 +419,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
         try fixture.addDerivedData(
@@ -494,7 +497,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
@@ -513,7 +516,7 @@ struct XcodeSweepStoreTests {
     }
 
     @Test(
-        "startDeletion owns the deletion task and cancelOperation stops mid-batch without showing a report",
+        "startDeletion owns the deletion task, and cancelOperation stops mid-batch and reports what was removed",
         .timeLimit(.minutes(1))
     )
     func startDeletionAndCancelOperationStopsMidBatch() async throws {
@@ -537,7 +540,7 @@ struct XcodeSweepStoreTests {
             lastAccessed: now
         )
 
-        let trasher = ControllableFileTrasher()
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
@@ -572,7 +575,10 @@ struct XcodeSweepStoreTests {
             await store.operation == .idle
         }
 
-        #expect(store.lastDeletionReport == nil)
+        let report = try #require(store.lastDeletionReport)
+        #expect(report.wasCancelled)
+        #expect(report.deletedCount == 1)
+        #expect(report.failures.isEmpty)
         #expect(store.errorMessage == nil)
         #expect(await trasher.trashedURLs == [firstURL])
         #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
@@ -632,7 +638,7 @@ struct XcodeSweepStoreTests {
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         ))
         let target = makeStorageItem(id: "dd", method: .trashFile(fixture.rootURL.appendingPathComponent("dd")))
 
@@ -657,10 +663,13 @@ struct XcodeSweepStoreTests {
 
     @Test("Stays busy until a cancelled deletion's simctl command has exited", .timeLimit(.minutes(1)))
     func cancelledDeletionBlocksNewOperationsUntilTeardownEnds() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
         let runner = SlowExitCommandRunner()
         let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
-            fileTrasher: RecordingFileTrasher()
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
         ))
         let device = makeStorageItem(
             id: "sim",
@@ -703,7 +712,7 @@ struct XcodeSweepStoreTests {
             let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
                 xcodeRootURL: fixture.xcodeRootURL,
                 commandRunner: runner,
-                fileTrasher: RecordingFileTrasher()
+                fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
             ))
             weakStore = store
             // The task can't start until this test suspends, so the store goes first.
@@ -732,7 +741,7 @@ struct XcodeSweepStoreTests {
             let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
                 xcodeRootURL: fixture.xcodeRootURL,
                 commandRunner: runner,
-                fileTrasher: RecordingFileTrasher()
+                fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
             ))
             weakStore = store
             task = operation.start(on: store)
@@ -751,6 +760,124 @@ struct XcodeSweepStoreTests {
         #expect(weakStore == nil)
     }
 
+    /// To replicate: delete several items where an early one fails → press Cancel → the alert
+    /// still lists that failure.
+    @Test("A cancelled deletion still reports the failures recorded before the cancel", .timeLimit(.minutes(1)))
+    func cancelledDeletionKeepsEarlierFailures() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let failingURL = try fixture.addDerivedData(folderName: "Fails-1", workspacePath: "/nonexistent/Fails.xcodeproj", lastAccessed: now)
+        let parkedURL = try fixture.addDerivedData(folderName: "Parked-2", workspacePath: "/nonexistent/Parked.xcodeproj", lastAccessed: now)
+        let trasher = ControllableFileTrasher(removingUnder: fixture.rootURL)
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: trasher,
+            now: { now }
+        ))
+        await store.startRefresh()?.value
+        let items = store.inventory.items(in: .derivedData)
+        let failing = try #require(items.first { $0.path == failingURL })
+        let parked = try #require(items.first { $0.path == parkedURL })
+
+        // Given: the first item fails and the second is in flight
+        let deletion = store.startDeletion(DeletionPlan(selection: [failing, parked]))
+        let first = try await trasher.nextPendingCall()
+        await trasher.resume(id: first.id, with: .failure(TestTrashError(message: "Item is locked")))
+        let second = try await trasher.nextPendingCall()
+        #expect(second.url == parkedURL)
+
+        // When
+        store.cancelOperation()
+        _ = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10)).get()
+
+        // Then
+        let report = try #require(store.lastDeletionReport)
+        #expect(report.wasCancelled)
+        #expect(report.deletedCount == 0)
+        #expect(report.failures.map(\.itemID) == [failing.id])
+        #expect(report.summary.contains("Item is locked"))
+    }
+
+    /// ADR 0001: a cancelled simctl delete may have taken effect. The rescan that follows every
+    /// deletion settles it, so the inventory shows what is really on disk.
+    @Test("Rescans after a cancelled simctl delete so a device it removed disappears", .timeLimit(.minutes(1)))
+    func rescanAfterCancelledDeleteDropsRemovedDevice() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let runner = DeleteTakesEffectThenParksRunner(udid: "GONE-1")
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
+        ))
+        await store.startRefresh()?.value
+        let device = try #require(store.inventory.items(in: .simulatorDevices).first)
+
+        // Given: simctl delete removed the device, but its result hasn't come back
+        let deletion = store.startDeletion(DeletionPlan(selection: [device]))
+        try await waitUntil("simctl delete in flight") { await runner.deleteInFlight }
+
+        // When
+        store.cancelOperation()
+        _ = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10)).get()
+
+        // Then: the rescan, not the cancelled delete, removed it from the inventory
+        #expect(store.operation == .idle)
+        #expect(store.inventory.items(in: .simulatorDevices).isEmpty)
+        #expect(store.lastDeletionReport == nil)
+    }
+
+    @Test("Stays busy from deletion through its rescan, and Stop ends the rescan", .timeLimit(.minutes(1)))
+    func stopDuringPostDeletionRescanKeepsPostDeletionInventory() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let goneURL = try fixture.addDerivedData(folderName: "Gone-1", workspacePath: "/nonexistent/Gone.xcodeproj", lastAccessed: now)
+        let keptURL = try fixture.addDerivedData(folderName: "Kept-2", workspacePath: "/nonexistent/Kept.xcodeproj", lastAccessed: now)
+        let controller = ControllableCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL),
+            now: { now }
+        ))
+        let initialScan = store.startRefresh()
+        try await answerSimctl(controller)
+        await initialScan?.value
+        let gone = try #require(store.inventory.items(in: .derivedData).first { $0.path == goneURL })
+
+        // Given: the deletion finished and its rescan is parked on simctl
+        let history = OperationHistory(store)
+        let deletion = store.startDeletion(DeletionPlan(selection: [gone]))
+        let call1 = try await controller.nextPendingCall()
+        let call2 = try await controller.nextPendingCall()
+        #expect(store.operation.isScanning)
+        #expect(store.lastDeletionReport?.deletedCount == 1)
+
+        // The store went from deleting to scanning without passing through idle.
+        let values = history.values + [store.operation]
+        let deletingAt = try #require(values.firstIndex { $0.isDeleting })
+        let scanningAt = try #require(values[deletingAt...].firstIndex { $0.isScanning })
+        #expect(!values[deletingAt ..< scanningAt].contains(.idle), "Operation history: \(values)")
+
+        // When
+        store.cancelOperation()
+        let cancelled = Task {
+            try await controller.waitForCancellation(id: call1.id)
+            try await controller.waitForCancellation(id: call2.id)
+        }
+        defer { cancelled.cancel() }
+        _ = try await awaitResult(of: cancelled, within: .seconds(10)).get()
+        _ = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10)).get()
+
+        // Then: the rescan stopped; the acknowledged removal and the report stay
+        #expect(store.operation == .idle)
+        #expect(store.inventory.items(in: .derivedData).map(\.path) == [keptURL])
+        #expect(store.lastDeletionReport?.deletedCount == 1)
+    }
+
     private func makeScannedStore(
         extraDerivedDataFolders: [String] = []
     ) async throws -> (XcodeSweepStore, TempXcodeFixture) {
@@ -766,7 +893,7 @@ struct XcodeSweepStoreTests {
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: StubCommandRunner(),
-            fileTrasher: RecordingFileTrasher(),
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL),
             now: { now }
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
@@ -809,6 +936,61 @@ enum StoreOperation: CaseIterable, Sendable {
                 category: .simulatorDevices,
                 method: .simctlDevice(udid: "UDID-1")
             )]))
+        }
+    }
+}
+
+/// Lists one device until `simctl delete` runs; the delete removes it, then stays in flight until
+/// cancelled, as a delete that took effect before its result reached Swift.
+private actor DeleteTakesEffectThenParksRunner: CommandRunning {
+    let udid: String
+    private(set) var deleteInFlight = false
+    private var deleted = false
+
+    init(udid: String) {
+        self.udid = udid
+    }
+
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
+        switch arguments {
+        case ["simctl", "list", "devices", "-j"]:
+            let devices = deleted ? "" : #"{"udid":"\#(udid)","isAvailable":true,"state":"Shutdown","name":"iPhone 17"}"#
+            let json = #"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[\#(devices)]}}"#
+            return CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
+        case ["simctl", "delete", udid]:
+            deleted = true
+            deleteInFlight = true
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            throw CancellationError()
+        default:
+            return CommandOutput(stdout: Data(#"{}"#.utf8), stderr: Data(), terminationStatus: 0)
+        }
+    }
+}
+
+/// Every value `store.operation` held, in order. Observation calls back just before each write,
+/// so reading the property there captures the value being replaced, even one held for no time.
+@MainActor
+private final class OperationHistory {
+    private(set) var values: [OperationState] = []
+    private let store: XcodeSweepStore
+
+    init(_ store: XcodeSweepStore) {
+        self.store = store
+        track()
+    }
+
+    private func track() {
+        withObservationTracking {
+            _ = self.store.operation
+        } onChange: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.values.append(self.store.operation)
+                self.track()
+            }
         }
     }
 }

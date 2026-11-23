@@ -281,4 +281,34 @@ struct XcodeStorageDeletionTests {
         #expect(report?.simctlDeletedCount == 1)
         #expect(report?.failures.isEmpty == true)
     }
+
+    @Test("Test trashers remove only items inside their own fixture")
+    func fakeTrashersStayInsideTheirFixture() throws {
+        let owned = try TempXcodeFixture()
+        let other = try TempXcodeFixture()
+        defer {
+            owned.cleanup()
+            other.cleanup()
+        }
+        // A sibling whose name starts with the owned root's name must not count as inside it.
+        let prefixSibling = URL(fileURLWithPath: owned.rootURL.path + "-sibling")
+        try FileManager.default.createDirectory(at: prefixSibling, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: prefixSibling) }
+
+        let ownedFile = owned.rootURL.appendingPathComponent("owned.bin")
+        let otherFile = other.rootURL.appendingPathComponent("other.bin")
+        let siblingFile = prefixSibling.appendingPathComponent("sibling.bin")
+        for file in [ownedFile, otherFile, siblingFile] {
+            try Data("x".utf8).write(to: file)
+        }
+
+        for file in [ownedFile, otherFile, siblingFile] {
+            try removeItem(file, ifInside: owned.rootURL)
+        }
+        try removeItem(otherFile, ifInside: nil)
+
+        #expect(!FileManager.default.fileExists(atPath: ownedFile.path))
+        #expect(FileManager.default.fileExists(atPath: otherFile.path))
+        #expect(FileManager.default.fileExists(atPath: siblingFile.path))
+    }
 }

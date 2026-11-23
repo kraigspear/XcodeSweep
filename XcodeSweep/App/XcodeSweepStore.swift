@@ -119,7 +119,12 @@ final class XcodeSweepStore {
     @discardableResult
     func startRefresh() -> Task<Void, Never>? {
         guard !operation.isBusy else { return nil }
+        return beginRefresh()
+    }
 
+    /// Takes over the operation slot for a scan, whatever holds it now; callers guarantee no other
+    /// operation is running, as `startRefresh()` does and a finishing deletion does for its rescan.
+    private func beginRefresh() -> Task<Void, Never> {
         let previousInventory = inventory
         let previousWarnings = scanWarnings
 
@@ -166,7 +171,7 @@ final class XcodeSweepStore {
                 }
             }
         } catch is CancellationError {
-            // Interrupted, not failed: restore the last completed result and report nothing.
+            // Interrupted, not failed: restore the inventory from when this scan began, and report nothing.
             inventory = previousInventory
             scanWarnings = previousWarnings
         } catch {
@@ -265,13 +270,15 @@ final class XcodeSweepStore {
         pendingDeletion = plan
     }
 
-    /// Starts deleting the plan's items, removing each from the inventory as it goes.
+    /// Starts deleting the plan's items, removing each from the inventory as it goes, then rescans.
     ///
-    /// Sets `lastDeletionReport` on completion. If cancelled, items already deleted stay removed
-    /// and no report is set. Call `cancelOperation()` to stop it.
+    /// Sets `lastDeletionReport` when the run completes, or when it is cancelled after removing or
+    /// failing at least one item. The rescan runs however the deletion ends: a cancelled `simctl`
+    /// delete may have taken effect, and free space and simulator availability have changed.
+    /// Call `cancelOperation()` to stop either phase.
     ///
-    /// - Returns: The deletion's task, for callers that wait on it; `nil` if busy or the plan is
-    ///   empty, and nothing started.
+    /// - Returns: The task for the deletion and its rescan, for callers that wait on it; `nil` if
+    ///   busy or the plan is empty, and nothing started.
     @discardableResult
     func startDeletion(_ plan: DeletionPlan) -> Task<Void, Never>? {
         guard !operation.isBusy, !plan.isEmpty else { return nil }
@@ -282,17 +289,17 @@ final class XcodeSweepStore {
         let task = Task { [weak self] in
             guard let self else { return }
             await self.runDeletion(plan)
+            // Hand the slot straight to the rescan, so the store is never idle between the phases.
+            await self.beginRefresh().value
         }
         operationTask = task
         return task
     }
 
+    /// Leaves `operation` as `.deleting`; the rescan that follows takes the slot from there.
     private func runDeletion(_ plan: DeletionPlan) async {
-        defer {
-            operation = .idle
-            operationTask = nil
-        }
-
+        var removed: [StorageItem] = []
+        var failures: [DeletionFailure] = []
         do {
             try Task.checkCancellation()
             for try await event in xcodeStorage.delete(plan) {
@@ -302,10 +309,14 @@ final class XcodeSweepStore {
 
                 case let .deleted(itemID, progress):
                     operation = .deleting(progress)
+                    if let item = plan.deletableItems.first(where: { $0.id == itemID }) {
+                        removed.append(item)
+                    }
                     removeItems(withIDs: [itemID])
 
-                case let .failed(_, progress):
+                case let .failed(failure, progress):
                     operation = .deleting(progress)
+                    failures.append(failure)
 
                 case let .completed(report):
                     lastDeletionReport = report
@@ -313,7 +324,10 @@ final class XcodeSweepStore {
                 }
             }
         } catch is CancellationError {
-            // Interrupted, not failed: already-deleted items stay removed and no completion alert is shown.
+            // Interrupted, not failed: report what happened before the stop, if anything did.
+            if !removed.isEmpty || !failures.isEmpty {
+                lastDeletionReport = DeletionReport(removed: removed, failures: failures, wasCancelled: true)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

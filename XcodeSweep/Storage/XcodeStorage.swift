@@ -373,8 +373,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
         private let storage: XcodeStorage
         private let items: [StorageItem]
         private var phase: Phase
-        private var trashedCount = 0
-        private var simctlDeletedCount = 0
+        private var removed: [StorageItem] = []
         private var reclaimedBytes: Int64 = 0
         private var failures: [DeletionFailure] = []
 
@@ -420,11 +419,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
 
                 do {
                     try await storage.remove(item)
-                    if item.deletionMethod.isPermanent {
-                        simctlDeletedCount += 1
-                    } else {
-                        trashedCount += 1
-                    }
+                    removed.append(item)
                     reclaimedBytes += item.sizeBytes
                     return .deleted(itemID: item.id, progress: progress(completing: index))
                 } catch is CancellationError {
@@ -442,14 +437,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
 
             case .finish:
                 phase = .done
-                return .completed(
-                    DeletionReport(
-                        trashedCount: trashedCount,
-                        simctlDeletedCount: simctlDeletedCount,
-                        reclaimedBytes: reclaimedBytes,
-                        failures: failures
-                    )
-                )
+                return .completed(DeletionReport(removed: removed, failures: failures))
             }
         }
     }
