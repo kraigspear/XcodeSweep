@@ -120,7 +120,7 @@ extension XcodeStorage {
         }
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
-        let archivesURL = xcodeRootURL.appendingPathComponent("Archives", isDirectory: true)
+        let archivesURL = locations.archivesURL
         if let dateFolders = try? fileManager.contentsOfDirectory(
             at: archivesURL,
             includingPropertiesForKeys: [.isDirectoryKey],

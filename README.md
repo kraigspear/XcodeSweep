@@ -15,6 +15,8 @@ A native macOS SwiftUI utility for inspecting and safely cleaning Xcode build an
 
 XcodeSweep scans at launch. When you return to it, it rescans if the last completed scan is more than 15 minutes old, the app is idle, and no cleanup is awaiting confirmation.
 
+Custom DerivedData and Archives locations set in Xcode's Settings → Locations are honored when they are absolute paths; a workspace-relative DerivedData location isn't scanned.
+
 ## Deletion Safety
 
 - Filesystem items (`DerivedData`, `DeviceSupport`, `Previews`, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible.

@@ -15,7 +15,7 @@ extension XcodeStorage {
     /// A project folder has an `info.plist`, or is named `<Project>-<28 lowercase letters>` and has
     /// lost it. Anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
     func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
-        let derivedDataURL = xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true)
+        let derivedDataURL = locations.derivedDataURL
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
             at: derivedDataURL,
