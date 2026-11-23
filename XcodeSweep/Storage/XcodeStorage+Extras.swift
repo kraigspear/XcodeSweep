@@ -54,24 +54,57 @@ extension XcodeStorage {
 
     // MARK: - SwiftUI Previews
 
-    func scanPreviews(now: Date) async -> [StorageItem] {
+    /// Preview devices `simctl` has registered, for deletion through it, and leftover folders it
+    /// doesn't know, for Trash.
+    ///
+    /// When `simctl` can't list the set, every folder is protected: any of them may be registered,
+    /// and trashing one behind CoreSimulator's back leaves its set pointing at a missing device.
+    /// Without the set's folder there is nothing to list, and `simctl` would fail on the missing path.
+    func scanPreviews(now: Date) async -> (items: [StorageItem], warning: String?) {
         let previewsDevicesURL = xcodeRootURL
             .appendingPathComponent("UserData/Previews/Simulator Devices", isDirectory: true)
 
         let fileManager = FileManager.default
-        guard let entries = try? fileManager.contentsOfDirectory(
+        guard fileManager.fileExists(atPath: previewsDevicesURL.path) else { return ([], nil) }
+        let entries = (try? fileManager.contentsOfDirectory(
             at: previewsDevicesURL,
             includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
+        )) ?? []
         let directories = entries.filter {
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
-        return await Self.scanConcurrently(directories, limiter: folderWalkLimiter) { url in
+        let registered: [StorageItem]?
+        let warning: String?
+        do {
+            registered = try await listSimulatorDevices(in: .previews, now: now)
+            warning = nil
+        } catch {
+            registered = nil
+            warning = error is CancellationError ? nil : "SwiftUI Previews: \(error.localizedDescription)"
+        }
+
+        // Matched by file identity: a folder may spell its UDID in another case than simctl, and on a
+        // case-sensitive volume two such spellings are distinct folders.
+        var registeredFolders: Set<FileIdentity> = []
+        var unlocatedUDIDs: Set<String> = []
+        for item in registered ?? [] {
+            if let folder = item.path, let identity = FileIdentity(of: folder) {
+                registeredFolders.insert(identity)
+            } else if case let .simctlDevice(udid, _) = item.deletionMethod {
+                unlocatedUDIDs.insert(udid.uppercased())
+            }
+        }
+        // A folder that can't be identified vanished or can't be reached, so it isn't offered at all.
+        let leftovers = directories.filter { url in
+            FileIdentity(of: url).map { !registeredFolders.contains($0) } ?? false
+        }
+        let protectedUDIDs = unlocatedUDIDs
+
+        let leftoverItems = await Self.scanConcurrently(leftovers, limiter: folderWalkLimiter) { url in
+            // Without simctl's list, or its path for a device of this name, the folder may be registered.
+            let canTrash = registered != nil && !protectedUDIDs.contains(url.lastPathComponent.uppercased())
             let size = try DirectorySizer.allocatedSize(of: url)
             let modified = Self.modificationDate(of: url)
             let plist = Self.loadPlist(at: url.appendingPathComponent("device.plist"))
@@ -99,10 +132,15 @@ extension XcodeStorage {
                 path: url,
                 workspacePath: nil,
                 status: status,
-                deletionMethod: .trashFile(url),
+                deletionMethod: canTrash
+                    ? .trashFile(url)
+                    : .notDeletable(reason: "simctl couldn't confirm this folder isn't a registered preview device"),
                 metadata: metadata
             )
         }
+
+        let items = ((registered ?? []) + leftoverItems).sorted { $0.sizeBytes > $1.sizeBytes }
+        return (items, warning)
     }
 
     // MARK: - Archives & Caches
@@ -216,5 +254,27 @@ extension XcodeStorage {
             deletionMethod: .trashFile(url),
             metadata: metadata
         )
+    }
+}
+
+/// A file's volume and inode, equal for every path that reaches it.
+private struct FileIdentity: Hashable {
+    let device: dev_t
+    let inode: ino_t
+
+    init?(of url: URL) {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        device = info.st_dev
+        inode = info.st_ino
+    }
+
+    static func == (lhs: FileIdentity, rhs: FileIdentity) -> Bool {
+        lhs.device == rhs.device && lhs.inode == rhs.inode
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(device)
+        hasher.combine(inode)
     }
 }

@@ -255,10 +255,11 @@ struct XcodeSweepStoreTests {
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
-        // Given: an initial scan parked on both simctl commands
+        // Given: an initial scan parked on its simctl commands
         let refreshTask = Task { await store.refreshIfNeeded() }
-        _ = try await controller.nextPendingCall()
-        _ = try await controller.nextPendingCall()
+        for _ in 0 ..< scanSimctlListCallCount {
+            _ = try await controller.nextPendingCall()
+        }
 
         // When
         refreshTask.cancel()
@@ -429,7 +430,7 @@ struct XcodeSweepStoreTests {
 
         // Seed one completed scan with one warning.
         let initialScan = store.startRefresh()
-        for _ in 0 ..< 2 {
+        for _ in 0 ..< scanSimctlListCallCount {
             let call = try await controller.nextPendingCall()
             if call.arguments.contains("devices") {
                 await controller.resume(id: call.id, with: .success(
@@ -457,23 +458,26 @@ struct XcodeSweepStoreTests {
         // Overlapping startRefresh while busy must be ignored.
         store.startRefresh()
 
-        let call1 = try await controller.nextPendingCall()
-        let call2 = try await controller.nextPendingCall()
+        var rescanCalls: [ParkedCall<[String]>] = []
+        for _ in 0 ..< scanSimctlListCallCount {
+            try await rescanCalls.append(controller.nextPendingCall())
+        }
         try await waitUntil("rescan reported new DerivedData") {
             await store.inventory.items(in: .derivedData).count == 2
         }
 
         store.cancelOperation()
 
-        try await controller.waitForCancellation(id: call1.id)
-        try await controller.waitForCancellation(id: call2.id)
+        for call in rescanCalls {
+            try await controller.waitForCancellation(id: call.id)
+        }
         try await waitUntil("store returns to idle after cancelOperation") {
             await store.operation == .idle
         }
 
         #expect(store.inventory == completedInventory)
         #expect(store.scanWarnings == completedWarnings)
-        #expect(await controller.recordedArguments.count == 4)
+        #expect(await controller.recordedArguments.count == 2 * scanSimctlListCallCount)
 
         // A follow-up refresh after cancellation completes cleanly and picks up Added-2.
         let followUp = store.startRefresh()
@@ -637,9 +641,9 @@ struct XcodeSweepStoreTests {
         ))
         let target = makeStorageItem(id: "dd", method: .trashFile(fixture.rootURL.appendingPathComponent("dd")))
 
-        // Given: a scan whose simctl commands are both in flight
+        // Given: a scan whose three simctl list commands are all in flight
         let scan = store.startRefresh()
-        try await waitUntil("both simctl commands started") { await runner.startedCount == 2 }
+        try await waitUntil("simctl list commands started") { await runner.startedCount == scanSimctlListCallCount }
 
         // When: Stop is pressed but the commands haven't exited yet
         store.cancelOperation()
@@ -897,7 +901,7 @@ struct XcodeSweepStoreTests {
     }
 
     private func answerSimctl(_ controller: ControllableCommandRunner) async throws {
-        for _ in 0 ..< 2 {
+        for _ in 0 ..< scanSimctlListCallCount {
             let call = try await controller.nextPendingCall()
             let json = call.arguments.contains("devices") ? #"{"devices":{}}"# : "{}"
             await controller.resume(id: call.id, with: .success(
@@ -912,10 +916,10 @@ enum StoreOperation: CaseIterable, Sendable {
     case scan
     case simctlDeletion
 
-    /// Commands parked before cancellation: both list commands, or the device's delete.
+    /// Commands parked before cancellation: the scan's list commands, or the device's delete.
     var commandCount: Int {
         switch self {
-        case .scan: 2
+        case .scan: scanSimctlListCallCount
         case .simctlDeletion: 1
         }
     }

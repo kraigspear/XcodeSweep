@@ -91,8 +91,8 @@ struct XcodeStorage: Sendable {
         switch item.deletionMethod {
         case let .trashFile(url):
             try await Self.removing { try await fileTrasher.trashItem(at: url) }
-        case let .simctlDevice(udid):
-            try await deleteSimulatorDevice(udid: udid)
+        case let .simctlDevice(udid, deviceSet):
+            try await deleteSimulatorDevice(udid: udid, in: deviceSet)
         case let .simctlRuntime(identifier):
             try await deleteSimulatorRuntime(identifier: identifier)
         case .notDeletable:
@@ -199,7 +199,8 @@ private extension DeletionMethod {
     var logName: String {
         switch self {
         case .trashFile: "trash"
-        case .simctlDevice: "simctlDevice"
+        case .simctlDevice(_, .standard): "simctlDevice"
+        case .simctlDevice(_, .previews): "simctlPreviewDevice"
         case .simctlRuntime: "simctlRuntime"
         case .notDeletable: "none"
         }
@@ -209,7 +210,7 @@ private extension DeletionMethod {
     var logTarget: String {
         switch self {
         case let .trashFile(url): url.path
-        case let .simctlDevice(udid): udid
+        case let .simctlDevice(udid, _): udid
         case let .simctlRuntime(identifier): identifier
         case .notDeletable: ""
         }
@@ -307,9 +308,9 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 
                     group.addTask {
                         guard !Task.isCancelled else { return nil }
-                        let items = await storage.scanPreviews(now: referenceDate)
+                        let previews = await storage.scanPreviews(now: referenceDate)
                         guard !Task.isCancelled else { return nil }
-                        return (.previews, items, nil)
+                        return (.previews, previews.items, previews.warning)
                     }
 
                     group.addTask {

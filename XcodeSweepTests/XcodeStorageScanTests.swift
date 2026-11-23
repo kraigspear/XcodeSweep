@@ -301,7 +301,7 @@ struct XcodeStorageScanTests {
         #expect(snapshot.warnings.first?.contains("timed out") == true)
     }
 
-    @Test("Gives both simctl list commands a 60-second timeout during scan")
+    @Test("Gives every simctl list command a 60-second timeout during scan")
     func scanPassesTimeoutToSimctlListCommands() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
@@ -318,9 +318,11 @@ struct XcodeStorageScanTests {
         let calls = await runner.calls
         let devicesCall = try #require(calls.first { $0.arguments == ["simctl", "list", "devices", "-j"] })
         let runtimesCall = try #require(calls.first { $0.arguments == ["simctl", "runtime", "list", "-j"] })
+        let previewsCall = try #require(calls.first { $0.arguments == ["simctl", "--set", "previews", "list", "devices", "-j"] })
         // A literal, so raising the constant fails here; ADR 0001's reasoning assumes a short limit.
         #expect(devicesCall.timeout == .seconds(60))
         #expect(runtimesCall.timeout == .seconds(60))
+        #expect(previewsCall.timeout == .seconds(60))
     }
 
     @Test("Classifies DerivedData as orphaned only when its workspace is provably gone")
@@ -475,5 +477,154 @@ struct XcodeStorageScanTests {
         #expect(caches["ModuleCache.noindex"]?.status == .stale)
         // A cache folder whose name matches the module cache's id must not share it.
         #expect(caches["ModuleCache.noindex"]?.id != caches["moduleCache"]?.id)
+    }
+
+    /// Trashing a registered preview device leaves CoreSimulator's set pointing at a missing folder.
+    /// To replicate: open a SwiftUI preview in Xcode → scan → the SwiftUI Previews row deletes via simctl.
+    @Test("Lists registered preview devices for simctl deletion and leftover folders for Trash")
+    func previewDevicesComeFromSimctl() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        // simctl reaches the folder through another path, a symlink: one folder and one device, so one row.
+        let registeredURL = try fixture.addPreviewDevice(
+            udid: "abcdef01-reg1", name: "iPhone 18 Pro", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        let leftoverURL = try fixture.addPreviewDevice(
+            udid: "LEFTOVER-1", name: "iPhone 17", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-2", modifiedDate: now
+        )
+        let registeredAlias = fixture.rootURL.appendingPathComponent("ABCDEF01-REG1")
+        try FileManager.default.createSymbolicLink(at: registeredAlias, withDestinationURL: registeredURL)
+        let previewJSON = """
+        {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
+          "dataPath":"\(registeredAlias.path)/data","dataPathSize":2000,"logPathSize":500,
+          "udid":"ABCDEF01-REG1","lastUsedAt":"2026-09-01T00:00:00Z","isAvailable":true,"state":"Shutdown","name":"iPhone 18 Pro"
+        }]}}
+        """
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(previewDevicesJSON: previewJSON),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        let previews = try #require(snapshot.itemsByCategory[.previews])
+        let registered = try #require(previews.first { $0.name == "iPhone 18 Pro" })
+        #expect(registered.deletionMethod == .simctlDevice(udid: "ABCDEF01-REG1", deviceSet: .previews))
+        #expect(registered.sizeBytes == 2500)
+        // Aged by simctl's last use, not the recently modified folder.
+        #expect(registered.lastUsedDate == testISO8601Date("2026-09-01T00:00:00Z"))
+        #expect(registered.status == .stale)
+        let leftover = try #require(previews.first { $0.name == "iPhone 17" })
+        #expect(leftover.deletionMethod == .trashFile(leftoverURL))
+        #expect(previews.count == 2)
+        #expect(snapshot.warnings.isEmpty)
+    }
+
+    /// Without simctl's answer, any folder might be registered, so none is offered for Trash.
+    /// To replicate: make `xcrun simctl --set previews list` fail → scan → preview rows are protected.
+    @Test("Protects preview folders and warns when simctl can't list the preview set")
+    func previewFoldersProtectedWhenSimctlFails() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        try fixture.addPreviewDevice(
+            udid: "UNKNOWN-1", name: "iPhone 17", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-2", modifiedDate: now
+        )
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(
+                previewDevicesError: ProcessRunnerError.nonZeroExit(command: "xcrun", status: 1, stderr: "no previews set")
+            ),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        let previews = try #require(snapshot.itemsByCategory[.previews])
+        #expect(previews.count == 1)
+        #expect(previews.first?.isDeletable == false)
+        #expect(snapshot.warnings.contains { $0.hasPrefix("SwiftUI Previews:") })
+    }
+
+    /// `simctl --set previews` fails when Xcode has never created the set.
+    /// To replicate: on a Mac that has never run a SwiftUI preview, scan → no SwiftUI Previews warning.
+    @Test("Skips the preview set, without a warning, when its folder doesn't exist")
+    func missingPreviewSetIsQuiet() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        try FileManager.default.removeItem(at: fixture.xcodeRootURL.appendingPathComponent("UserData"))
+        let runner = RecordingCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.itemsByCategory[.previews] == [])
+        #expect(snapshot.warnings.isEmpty)
+        #expect(await !runner.calls.contains { $0.arguments.contains("previews") })
+    }
+
+    /// On a case-sensitive volume a folder spelled differently from simctl's UDID is a different
+    /// folder; only the one simctl's data path names is the registered device.
+    @Test("A preview folder simctl's data path doesn't name is a leftover, even with the same UDID")
+    func sameUDIDDifferentFolderIsLeftover() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let setFolder = try fixture.addPreviewDevice(
+            udid: "abcdef01-copy", name: "Copy", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        let registeredFolder = fixture.rootURL.appendingPathComponent("Elsewhere/ABCDEF01-COPY", isDirectory: true)
+        try FileManager.default.createDirectory(at: registeredFolder, withIntermediateDirectories: true)
+        let previewJSON = """
+        {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
+          "dataPath":"\(registeredFolder.path)/data","udid":"ABCDEF01-COPY","isAvailable":true,"state":"Shutdown","name":"Registered"
+        }]}}
+        """
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(previewDevicesJSON: previewJSON),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let previews = try #require(try await finalScanSnapshot(from: storage).itemsByCategory[.previews])
+
+        #expect(previews.map(\.name).sorted() == ["Copy", "Registered"])
+        #expect(previews.first { $0.name == "Copy" }?.deletionMethod == .trashFile(setFolder))
+    }
+
+    /// Without a data path there is no folder to compare, so a folder named like the device is kept.
+    @Test("A preview folder named like a registered device with no data path is protected")
+    func unlocatedRegisteredDeviceProtectsItsFolder() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        try fixture.addPreviewDevice(
+            udid: "abcdef01-nopath", name: "Folder", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        let previewJSON = """
+        {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
+          "udid":"ABCDEF01-NOPATH","isAvailable":true,"state":"Shutdown","name":"Registered"
+        }]}}
+        """
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(previewDevicesJSON: previewJSON),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let previews = try #require(try await finalScanSnapshot(from: storage).itemsByCategory[.previews])
+
+        #expect(previews.first { $0.name == "Folder" }?.isDeletable == false)
+        #expect(previews.first { $0.name == "Registered" }?.isDeletable == true)
     }
 }

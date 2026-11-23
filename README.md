@@ -10,15 +10,15 @@ A native macOS SwiftUI utility for inspecting and safely cleaning Xcode build an
 - **Simulator Devices** (`xcrun simctl list devices -j`) — shows allocated data + log size, runtime, boot state, and unavailable simulators.
 - **Simulator Runtimes** (`xcrun simctl runtime list -j`) — lists installed iOS/watchOS/tvOS/visionOS disk images, build numbers, sizes, and last-used timestamps.
 - **Device Support** (`~/Library/Developer/Xcode/* DeviceSupport`) — cached physical device symbols.
-- **SwiftUI Previews** (`~/Library/Developer/Xcode/UserData/Previews/Simulator Devices`).
+- **SwiftUI Previews** (`xcrun simctl --set previews list devices -j`, plus folders in `~/Library/Developer/Xcode/UserData/Previews/Simulator Devices` that `simctl` doesn't know).
 - **Archives & Caches** (`~/Library/Developer/Xcode/Archives`, plus the caches Xcode shares across projects in `DerivedData`, such as `ModuleCache.noindex` and `SDKExplicitPrecompiledModules`).
 
 XcodeSweep scans at launch. When you return to it, it rescans if the last completed scan is more than 15 minutes old, the app is idle, and no cleanup is awaiting confirmation.
 
 ## Deletion Safety
 
-- Filesystem items (`DerivedData`, `DeviceSupport`, `Previews`, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible.
-- Simulator devices and runtime disk images are removed through **`xcrun simctl`** after explicit confirmation (XcodeSweep tries to shut each simulator down first).
+- Filesystem items (`DerivedData`, `DeviceSupport`, leftover preview folders, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible. If `simctl` can't list the preview set, preview folders are protected, since any of them might be registered.
+- Simulator devices, registered preview devices, and runtime disk images are removed through **`xcrun simctl`** after explicit confirmation (XcodeSweep tries to shut each simulator down first).
 - Every removal, failure, and item stopped mid-removal is recorded in the unified log: `/usr/bin/log show --last 1d --predicate 'subsystem == "com.kraigspear.XcodeSweep"'`.
 - App Sandbox is intentionally disabled (`com.apple.security.app-sandbox = false`) so the app can inspect `~/Library/Developer/` and invoke `/usr/bin/xcrun simctl`.
 

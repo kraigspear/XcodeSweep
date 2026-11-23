@@ -259,6 +259,25 @@ struct XcodeStorageDeletionTests {
         ])
     }
 
+    /// To replicate: open a SwiftUI preview → delete its preview device in XcodeSweep → it leaves the preview set.
+    @Test("Shuts down and deletes a preview device through simctl's preview set")
+    func deletesPreviewDeviceInPreviewSet() async throws {
+        let runner = RecordingCommandRunner()
+        let storage = XcodeStorage(commandRunner: runner, fileTrasher: RecordingFileTrasher())
+        let previewDevice = makeStorageItem(
+            id: "preview-1",
+            category: .previews,
+            method: .simctlDevice(udid: "PREVIEW-1", deviceSet: .previews)
+        )
+
+        for try await _ in storage.delete(DeletionPlan(selection: [previewDevice])) {}
+
+        #expect(await runner.calls.map(\.arguments) == [
+            ["simctl", "--set", "previews", "shutdown", "PREVIEW-1"],
+            ["simctl", "--set", "previews", "delete", "PREVIEW-1"],
+        ])
+    }
+
     /// To replicate: delete a shut-down simulator; `simctl shutdown` fails, and the delete still succeeds.
     @Test("Deletes a simulator even when its shutdown fails because it is already shut down")
     func deletesWhenShutdownFails() async throws {
