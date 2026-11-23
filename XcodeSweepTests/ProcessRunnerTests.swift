@@ -343,16 +343,19 @@ struct ProcessRunnerTests {
     func closesPipesWhenGrandchildOutlivesTimeout() async throws {
         let marker = PIDMarker()
         defer { marker.remove() }
-        let run = ProcessRun(
+        var run: ProcessRun? = ProcessRun(
             executableURL: URL(fileURLWithPath: "/bin/sh"),
             arguments: ["-c", PIDMarker.spawnTermImmuneGrandchild(running: "yes"), marker.path]
         )
-        let task = startTask(run)
-        defer { run.cancel() }
+        weak var weakRun = run
+        let task = startTask(try #require(run))
+        defer { weakRun?.cancel() }
         let grandchildPID = try await marker.waitForPID()
         defer { kill(grandchildPID, SIGKILL) }
 
-        run.timeOut(after: .seconds(1))
+        run?.timeOut(after: .seconds(1))
+        // As in ProcessRunner, the run's handlers are its last owners, so releasing them closes the read ends.
+        run = nil
 
         let result = try await awaitResult(of: task, within: .seconds(10))
         #expect(throws: ProcessRunnerError.self) { try result.get() }
@@ -374,10 +377,13 @@ struct ProcessRunnerTests {
         let pid = try await marker.waitForPID()
         defer { kill(pid, SIGKILL) }
 
+        let cancelledAt = ContinuousClock.now
         let result = try await cancelAndAwaitResult(of: task, within: .seconds(10))
 
         #expect(throws: CancellationError.self) { try result.get() }
         #expect(kill(pid, 0) != 0)
+        // A sleep can't end early, so a shorter wait means SIGKILL came before the grace period.
+        #expect(cancelledAt.duration(to: .now) >= .milliseconds(300))
     }
 
     @Test(

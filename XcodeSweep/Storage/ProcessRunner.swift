@@ -5,8 +5,8 @@ import os
 protocol CommandRunning: Sendable {
     /// Runs `executableURL` with `arguments` to completion and returns its output.
     ///
-    /// - Parameter timeout: How long to wait before giving up on the command, or `nil` to wait until it
-    ///   finishes. On expiry the command is asked to stop; it may outlive the call.
+    /// - Parameter timeout: How long to let the command run, or `nil` for no limit. On expiry the command
+    ///   is stopped, and the call throws once it has exited.
     /// - Throws: An implementation-specific error when the command can't run, times out, or fails.
     func run(executableURL: URL, arguments: [String], timeout: Duration?) async throws -> CommandOutput
 }
