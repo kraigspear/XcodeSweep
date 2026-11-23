@@ -40,7 +40,8 @@ struct XcodeStorage: Sendable {
     let fileTrasher: any FileTrashing
     /// The clock that stamps scans and ages items.
     let now: @Sendable () -> Date
-    /// Shared by every category, so their walks together leave two pool threads free.
+    /// Shared by every category. Caps walks at `activeProcessorCount - 2`, at least one, meant to
+    /// leave pool threads for categories that are ready to report.
     let folderWalkLimiter = FolderWalkLimiter(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
 
     init(
@@ -97,8 +98,8 @@ struct XcodeStorage: Sendable {
 
     // MARK: - Shared Internal Helpers
 
-    /// Inspects `inputs` concurrently, as many at once as `limiter` allows, returning the items
-    /// found sorted largest first.
+    /// Inspects `inputs` concurrently, as many at once as `limiter` allows in one lane of its own,
+    /// returning the items found sorted largest first.
     ///
     /// A child cancelled before its inspection starts skips its input, and an input whose `inspect`
     /// throws contributes no item; the inspections here throw only on cancellation.
@@ -107,11 +108,11 @@ struct XcodeStorage: Sendable {
         limiter: FolderWalkLimiter,
         inspect: @escaping @Sendable (Input) throws -> StorageItem?
     ) async -> [StorageItem] {
-        await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
+        let lane = limiter.makeLane()
+        return await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for input in inputs {
                 group.addTask {
-                    guard !Task.isCancelled else { return nil }
-                    return try? await limiter.withPermit { try? inspect(input) }
+                    try? await limiter.withPermit(in: lane) { try? inspect(input) }
                 }
             }
 

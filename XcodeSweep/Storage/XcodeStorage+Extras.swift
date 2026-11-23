@@ -112,8 +112,9 @@ extension XcodeStorage {
         let fileManager = FileManager.default
 
         // 1. Caches Xcode shares across projects in DerivedData
+        let lane = folderWalkLimiter.makeLane()
         for cacheURL in sharedCaches {
-            try await items.append(folderWalkLimiter.withPermit { () throws(CancellationError) in
+            try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
                 try Self.inspectSharedCache(at: cacheURL)
             })
         }
