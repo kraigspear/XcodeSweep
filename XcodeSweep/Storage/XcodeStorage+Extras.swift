@@ -96,8 +96,9 @@ extension XcodeStorage {
                 unlocatedUDIDs.insert(udid.uppercased())
             }
         }
+        // A folder that can't be identified vanished or can't be reached, so it isn't offered at all.
         let leftovers = directories.filter { url in
-            FileIdentity(of: url).map { !registeredFolders.contains($0) } ?? true
+            FileIdentity(of: url).map { !registeredFolders.contains($0) } ?? false
         }
         let protectedUDIDs = unlocatedUDIDs
 

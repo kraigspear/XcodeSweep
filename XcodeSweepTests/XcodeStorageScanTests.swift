@@ -486,15 +486,15 @@ struct XcodeStorageScanTests {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
         let now = testISO8601Date("2026-11-21T10:00:00Z")
-        // A lowercase folder that simctl spells in uppercase: on this case-insensitive volume, one
-        // folder and one device, so one row.
+        // simctl reaches the folder through another path, a symlink: one folder and one device, so one row.
         let registeredURL = try fixture.addPreviewDevice(
             udid: "abcdef01-reg1", name: "iPhone 18 Pro", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
         )
         let leftoverURL = try fixture.addPreviewDevice(
             udid: "LEFTOVER-1", name: "iPhone 17", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-2", modifiedDate: now
         )
-        let registeredAlias = registeredURL.deletingLastPathComponent().appendingPathComponent("ABCDEF01-REG1")
+        let registeredAlias = fixture.rootURL.appendingPathComponent("ABCDEF01-REG1")
+        try FileManager.default.createSymbolicLink(at: registeredAlias, withDestinationURL: registeredURL)
         let previewJSON = """
         {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
           "dataPath":"\(registeredAlias.path)/data","dataPathSize":2000,"logPathSize":500,
