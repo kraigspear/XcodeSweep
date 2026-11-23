@@ -22,16 +22,18 @@ struct AppSceneTests {
     }
 
     /// The alert lists only the first four failures; this list is where the rest are seen.
-    @Test("The failure list shows every failure")
+    /// To replicate: clean up six items where five or more fail → Show All Failures → scroll the list.
+    @Test("The failure list shows every failure with its reason")
     func failureListShowsEveryFailure() throws {
         // Words, not numbered names: fast recognition misreads digits.
         let names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"]
-        let failures = names.map { DeletionFailure(itemID: $0, itemName: $0, reason: "Permission denied") }
+        let failures = names.map { DeletionFailure(itemID: $0, itemName: $0, reason: "Locked by \($0)") }
 
         let lines = try recognizedText(in: FailureRowsView(failures: failures).frame(width: 420))
 
         for name in names {
-            #expect(lines.contains { $0.contains(name) }, "Recognized: \(lines)")
+            #expect(lines.contains { $0 == name }, "Recognized: \(lines)")
+            #expect(lines.contains { $0.contains("Locked by \(name)") }, "Recognized: \(lines)")
         }
     }
 

@@ -112,6 +112,7 @@ struct DeletionPlanTests {
         #expect(summary.contains("…and 2 more."))
     }
 
+    /// To replicate: clean up a batch where exactly four items fail → read the Cleanup Complete alert.
     @Test("A summary with every failure listed doesn't mention more")
     func reportSummary_withFewFailures_listsAll() {
         let failures = (1 ... 4).map { DeletionFailure(itemID: "f\($0)", itemName: "Item \($0)", reason: "Busy") }
