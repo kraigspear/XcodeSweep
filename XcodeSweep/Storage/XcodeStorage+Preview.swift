@@ -17,7 +17,7 @@
             "Previews don't run commands or move files to Trash."
         }
 
-        func run(executableURL _: URL, arguments _: [String]) async throws -> CommandOutput {
+        func run(executableURL _: URL, arguments _: [String], timeout _: Duration?) async throws -> CommandOutput {
             throw self
         }
 

@@ -1,12 +1,17 @@
 import Foundation
 
 extension XcodeStorage {
+    /// Timeout for read-only `simctl` list commands; deletions run without a timeout so a slow
+    /// removal isn't aborted while it may still take effect (the user can cancel instead).
+    static let simctlListTimeout: Duration = .seconds(60)
+
     // MARK: - Scanning
 
     func scanSimulatorRuntimes(now: Date) async throws -> [StorageItem] {
         let output = try await commandRunner.run(
             executableURL: Self.xcrunURL,
-            arguments: ["simctl", "runtime", "list", "-j"]
+            arguments: ["simctl", "runtime", "list", "-j"],
+            timeout: Self.simctlListTimeout
         )
         return try Self.decodeRuntimes(from: output.stdout, now: now)
     }
@@ -14,7 +19,8 @@ extension XcodeStorage {
     func scanSimulatorDevices(now: Date) async throws -> [StorageItem] {
         let output = try await commandRunner.run(
             executableURL: Self.xcrunURL,
-            arguments: ["simctl", "list", "devices", "-j"]
+            arguments: ["simctl", "list", "devices", "-j"],
+            timeout: Self.simctlListTimeout
         )
         return try Self.decodeDevices(from: output.stdout, now: now)
     }
@@ -27,7 +33,8 @@ extension XcodeStorage {
             do {
                 _ = try await commandRunner.run(
                     executableURL: Self.xcrunURL,
-                    arguments: ["simctl", "shutdown", udid]
+                    arguments: ["simctl", "shutdown", udid],
+                    timeout: nil
                 )
             } catch is CancellationError {
                 throw CancellationError()
@@ -38,14 +45,16 @@ extension XcodeStorage {
         }
         _ = try await commandRunner.run(
             executableURL: Self.xcrunURL,
-            arguments: ["simctl", "delete", udid]
+            arguments: ["simctl", "delete", udid],
+            timeout: nil
         )
     }
 
     func deleteSimulatorRuntime(identifier: String) async throws {
         _ = try await commandRunner.run(
             executableURL: Self.xcrunURL,
-            arguments: ["simctl", "runtime", "delete", identifier]
+            arguments: ["simctl", "runtime", "delete", identifier],
+            timeout: nil
         )
     }
 

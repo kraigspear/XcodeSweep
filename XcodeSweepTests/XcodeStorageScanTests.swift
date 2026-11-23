@@ -278,6 +278,50 @@ struct XcodeStorageScanTests {
         #expect(snapshot.warnings.count == 2)
     }
 
+    @Test("Records a warning instead of failing scan when simctl times out")
+    func scanCapturesSimctlTimeoutWarning() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(
+                devicesError: ProcessRunnerError.timedOut(
+                    command: "xcrun simctl list devices -j",
+                    timeout: .seconds(60)
+                )
+            ),
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.itemsByCategory[.simulatorDevices] == [])
+        #expect(snapshot.warnings.count == 1)
+        #expect(snapshot.warnings.first?.contains("timed out") == true)
+    }
+
+    @Test("Passes simctlListTimeout to both simctl list commands during scan")
+    func scanPassesTimeoutToSimctlListCommands() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let runner = RecordingCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        _ = try await finalScanSnapshot(from: storage)
+
+        let calls = await runner.calls
+        let devicesCall = try #require(calls.first { $0.arguments == ["simctl", "list", "devices", "-j"] })
+        let runtimesCall = try #require(calls.first { $0.arguments == ["simctl", "runtime", "list", "-j"] })
+        #expect(devicesCall.timeout == XcodeStorage.simctlListTimeout)
+        #expect(runtimesCall.timeout == XcodeStorage.simctlListTimeout)
+    }
+
     @Test("Classifies DerivedData as orphaned only when its workspace is provably gone")
     func unreachableWorkspaceIsNotOrphaned() async throws {
         let fixture = try TempXcodeFixture()

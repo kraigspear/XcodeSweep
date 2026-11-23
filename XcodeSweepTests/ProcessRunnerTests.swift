@@ -86,7 +86,8 @@ struct ProcessRunnerTests {
 
         let result = try await cancelAndAwaitResult(of: task, within: .seconds(2))
         #expect(throws: CancellationError.self) { try result.get() }
-        try await waitUntil("child process exited") { kill(pid, 0) != 0 }
+        // The error arrives only after the child has exited.
+        #expect(kill(pid, 0) != 0)
     }
 
     @Test(
@@ -260,6 +261,192 @@ struct ProcessRunnerTests {
         #expect(sizes.count == commandCount)
         #expect(sizes.allSatisfy { $0 == (byteCount, byteCount) })
     }
+
+    @Test("Throws timedOut once a command outlives its timeout", .timeLimit(.minutes(1)))
+    func throwsTimedOutWhenDeadlinePasses() async {
+        do {
+            _ = try await ProcessRunner().run(
+                executableURL: URL(fileURLWithPath: "/bin/sleep"),
+                arguments: ["30"],
+                timeout: .milliseconds(250)
+            )
+            Issue.record("Expected ProcessRunnerError.timedOut")
+        } catch let ProcessRunnerError.timedOut(command, timeout) {
+            #expect(command.contains("sleep"))
+            #expect(timeout == .milliseconds(250))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Returns output without waiting out an armed timeout", .timeLimit(.minutes(1)))
+    func returnsOutputBeforeArmedTimeout() async throws {
+        let task = Task {
+            try await ProcessRunner().run(
+                executableURL: URL(fileURLWithPath: "/bin/echo"),
+                arguments: ["done"],
+                timeout: .seconds(120)
+            )
+        }
+        defer { task.cancel() }
+
+        let output = try await awaitResult(of: task, within: .seconds(10)).get()
+        #expect(output.stdoutString.trimmingCharacters(in: .whitespacesAndNewlines) == "done")
+    }
+
+    @Test("Throws CancellationError, not timedOut, when cancelled with a timeout armed", .timeLimit(.minutes(1)))
+    func cancellationWinsOverArmedTimeout() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+
+        let task = Task {
+            try await ProcessRunner().run(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "\(PIDMarker.publishOwnPID); exec sleep 30", marker.path],
+                timeout: .seconds(120)
+            )
+        }
+        defer { task.cancel() }
+        let pid = try await marker.waitForPID()
+        defer { kill(pid, SIGKILL) }
+
+        let result = try await cancelAndAwaitResult(of: task, within: .seconds(2))
+        #expect(throws: CancellationError.self) { try result.get() }
+        // The error arrives only after the child has exited.
+        #expect(kill(pid, 0) != 0)
+    }
+
+    @Test("Terminates the child and throws timedOut when the deadline fires", .timeLimit(.minutes(1)))
+    func timeOutTerminatesLaunchedChild() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+        let run = ProcessRun(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "\(PIDMarker.publishOwnPID); exec sleep 30", marker.path]
+        )
+        let task = startTask(run)
+        defer { run.cancel() }
+        let pid = try await marker.waitForPID()
+        defer { kill(pid, SIGKILL) }
+
+        run.timeOut(after: .seconds(1))
+
+        let result = try await awaitResult(of: task, within: .seconds(10))
+        #expect(throws: ProcessRunnerError.self) { try result.get() }
+        #expect(kill(pid, 0) != 0)
+    }
+
+    @Test(
+        "Closes pipes on timeout so a SIGTERM-immune grandchild still writing exits on SIGPIPE",
+        .timeLimit(.minutes(1))
+    )
+    func closesPipesWhenGrandchildOutlivesTimeout() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+        var run: ProcessRun? = ProcessRun(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", PIDMarker.spawnTermImmuneGrandchild(running: "yes"), marker.path]
+        )
+        weak var weakRun = run
+        let task = startTask(try #require(run))
+        defer { weakRun?.cancel() }
+        let grandchildPID = try await marker.waitForPID()
+        defer { kill(grandchildPID, SIGKILL) }
+
+        run?.timeOut(after: .seconds(1))
+        // As in ProcessRunner, the run's handlers are its last owners, so releasing them closes the read ends.
+        run = nil
+
+        let result = try await awaitResult(of: task, within: .seconds(10))
+        #expect(throws: ProcessRunnerError.self) { try result.get() }
+        try await waitUntil("grandchild writer exited on SIGPIPE") { kill(grandchildPID, 0) != 0 }
+    }
+
+    @Test("Kills a child that ignores SIGTERM after the grace period, then throws", .timeLimit(.minutes(1)))
+    func killsChildThatIgnoresTermAfterGrace() async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+
+        let task = Task {
+            try await ProcessRunner(terminationGrace: .milliseconds(300)).run(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "trap '' TERM; \(PIDMarker.publishOwnPID); exec sleep 30", marker.path]
+            )
+        }
+        defer { task.cancel() }
+        let pid = try await marker.waitForPID()
+        defer { kill(pid, SIGKILL) }
+
+        let cancelledAt = ContinuousClock.now
+        let result = try await cancelAndAwaitResult(of: task, within: .seconds(10))
+
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(kill(pid, 0) != 0)
+        // A sleep can't end early, so a shorter wait means SIGKILL came before the grace period.
+        #expect(cancelledAt.duration(to: .now) >= .milliseconds(300))
+    }
+
+    @Test(
+        "A run aborted before it starts never launches and reports that abort",
+        .timeLimit(.minutes(1)),
+        arguments: [false, true]
+    )
+    func abortBeforeStartNeverLaunches(byTimeout: Bool) async throws {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xcodesweep-never-\(UUID().uuidString)")
+        let run = ProcessRun(executableURL: URL(fileURLWithPath: "/usr/bin/touch"), arguments: [marker.path])
+
+        if byTimeout {
+            run.timeOut(after: .seconds(1))
+        } else {
+            run.cancel()
+        }
+        let result = try await awaitResult(of: startTask(run), within: .seconds(10))
+
+        if byTimeout {
+            #expect(throws: ProcessRunnerError.self) { try result.get() }
+        } else {
+            #expect(throws: CancellationError.self) { try result.get() }
+        }
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    @Test(
+        "The first abort decides the result when cancellation and timeout both arrive",
+        .timeLimit(.minutes(1)),
+        arguments: [false, true]
+    )
+    func firstAbortWins(timeoutFirst: Bool) async throws {
+        let marker = PIDMarker()
+        defer { marker.remove() }
+        let run = ProcessRun(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "\(PIDMarker.publishOwnPID); exec sleep 30", marker.path]
+        )
+        let task = startTask(run)
+        let pid = try await marker.waitForPID()
+        defer { kill(pid, SIGKILL) }
+
+        // A second resume of the continuation would trap, so reaching the assertions proves one result.
+        if timeoutFirst {
+            run.timeOut(after: .seconds(1))
+            run.cancel()
+        } else {
+            run.cancel()
+            run.timeOut(after: .seconds(1))
+        }
+        let result = try await awaitResult(of: task, within: .seconds(10))
+
+        if timeoutFirst {
+            #expect(throws: ProcessRunnerError.self) { try result.get() }
+        } else {
+            #expect(throws: CancellationError.self) { try result.get() }
+        }
+    }
+}
+
+private func startTask(_ run: ProcessRun) -> Task<CommandOutput, any Error> {
+    Task { try await withCheckedThrowingContinuation { run.start($0) } }
 }
 
 // MARK: - Helpers
