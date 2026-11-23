@@ -34,8 +34,8 @@ enum DeletionEvent: Equatable, Sendable {
 struct XcodeStorage: Sendable {
     static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
 
-    /// The Xcode data folder, `~/Library/Developer/Xcode` by default.
-    let xcodeRootURL: URL
+    /// Where the scanned folders are.
+    let xcodeLocations: XcodeLocations
     let commandRunner: any CommandRunning
     let fileTrasher: any FileTrashing
     /// The clock that stamps scans and ages items.
@@ -45,16 +45,37 @@ struct XcodeStorage: Sendable {
     let folderWalkLimiter = FolderWalkLimiter(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
 
     init(
-        xcodeRootURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Developer/Xcode", isDirectory: true),
+        xcodeLocations: XcodeLocations = .current(),
         commandRunner: any CommandRunning = ProcessRunner(),
         fileTrasher: any FileTrashing = LiveFileTrasher(),
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.xcodeRootURL = xcodeRootURL
+        self.xcodeLocations = xcodeLocations
         self.commandRunner = commandRunner
         self.fileTrasher = fileTrasher
         self.now = now
+    }
+
+    /// Storage for the Xcode folder at `xcodeRootURL`, with DerivedData and archives in it.
+    ///
+    /// Xcode's Locations settings belong to the real Xcode folder, so they aren't read here.
+    init(
+        xcodeRootURL: URL,
+        commandRunner: any CommandRunning = ProcessRunner(),
+        fileTrasher: any FileTrashing = LiveFileTrasher(),
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.init(
+            xcodeLocations: XcodeLocations(xcodeRootURL: xcodeRootURL),
+            commandRunner: commandRunner,
+            fileTrasher: fileTrasher,
+            now: now
+        )
+    }
+
+    /// The Xcode data folder, `~/Library/Developer/Xcode` for the real Xcode.
+    var xcodeRootURL: URL {
+        xcodeLocations.xcodeRootURL
     }
 
     // MARK: - Scanning

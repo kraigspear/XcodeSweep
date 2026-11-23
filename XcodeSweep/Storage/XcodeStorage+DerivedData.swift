@@ -9,13 +9,16 @@ extension XcodeStorage {
         }
     }
 
-    /// DerivedData's folders, split into per-project build folders and caches Xcode shares across
-    /// projects, such as `ModuleCache.noindex` and `SDKExplicitPrecompiledModules`.
+    /// DerivedData's folders, split into per-project build folders and everything else: caches Xcode
+    /// shares across projects, such as `ModuleCache.noindex`, and, in a custom folder, folders that
+    /// may not be Xcode's at all.
     ///
-    /// A project folder has an `info.plist`, or is named `<Project>-<28 lowercase letters>` and has
-    /// lost it. Anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
+    /// A project folder is named `<Project>-<28 lowercase letters>`, or has an `info.plist`; in a
+    /// custom folder that plist must be Xcode's, recording a `WorkspacePath`. In the default folder
+    /// anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
     func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
-        let derivedDataURL = xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true)
+        let derivedDataURL = xcodeLocations.derivedDataURL
+        let isCustom = xcodeLocations.hasCustomDerivedData
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
             at: derivedDataURL,
@@ -32,8 +35,13 @@ extension XcodeStorage {
         var projects: [URL] = []
         var sharedCaches: [URL] = []
         for folder in folders {
-            let isProject = fileManager.fileExists(atPath: folder.appendingPathComponent("info.plist").path)
-                || folder.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
+            let plistURL = folder.appendingPathComponent("info.plist")
+            // A custom folder may hold anything, such as a repository with its own Info.plist, so
+            // there only Xcode's own plist, which records the workspace, counts.
+            let hasXcodePlist = isCustom
+                ? Self.loadPlist(at: plistURL)?["WorkspacePath"] is String
+                : fileManager.fileExists(atPath: plistURL.path)
+            let isProject = hasXcodePlist || folder.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
             if isProject {
                 projects.append(folder)
             } else {

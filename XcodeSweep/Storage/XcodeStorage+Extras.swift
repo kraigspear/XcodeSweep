@@ -151,14 +151,15 @@ extension XcodeStorage {
 
         // 1. Caches Xcode shares across projects in DerivedData
         let lane = folderWalkLimiter.makeLane()
+        let isCustom = xcodeLocations.hasCustomDerivedData
         for cacheURL in sharedCaches {
             try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
-                try Self.inspectSharedCache(at: cacheURL)
+                try Self.inspectSharedCache(at: cacheURL, inCustomFolder: isCustom)
             })
         }
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
-        let archivesURL = xcodeRootURL.appendingPathComponent("Archives", isDirectory: true)
+        let archivesURL = xcodeLocations.archivesURL
         if let dateFolders = try? fileManager.contentsOfDirectory(
             at: archivesURL,
             includingPropertiesForKeys: [.isDirectoryKey],
@@ -189,10 +190,34 @@ extension XcodeStorage {
 
     // MARK: - Private Inspection
 
+    /// Caches Xcode is known to create in DerivedData; in a custom folder, only these may be removed.
+    private static let knownSharedCacheNames: Set<String> = [moduleCacheFolderName, "SDKExplicitPrecompiledModules"]
+
     /// The module cache keeps its long-standing Unused status. Other folders aren't recommended:
-    /// most are build caches, and clearing one can slow the builds that use it.
-    private static func inspectSharedCache(at url: URL) throws(CancellationError) -> StorageItem {
+    /// most are build caches, and clearing one can slow the builds that use it. In a custom
+    /// DerivedData folder an unknown one may not be Xcode's at all, so it is protected, and left
+    /// unmeasured so it can't count as Xcode storage.
+    private static func inspectSharedCache(at url: URL, inCustomFolder: Bool) throws(CancellationError) -> StorageItem {
         let isModuleCache = url.lastPathComponent == moduleCacheFolderName
+        let isTrusted = !inCustomFolder || knownSharedCacheNames.contains(url.lastPathComponent)
+        guard isTrusted else {
+            return StorageItem(
+                id: "unrecognized:\(url.path)",
+                category: .archivesAndCaches,
+                name: url.lastPathComponent,
+                subtitle: "Not recognized as Xcode's; left alone and not counted",
+                sizeBytes: 0,
+                lastUsedDate: modificationDate(of: url),
+                path: url,
+                workspacePath: nil,
+                status: .active,
+                deletionMethod: .notDeletable(reason: "Not recognized as Xcode's, in a custom DerivedData folder that may hold other files"),
+                metadata: [
+                    MetadataEntry(key: "Type", value: "Unrecognized Folder"),
+                    MetadataEntry(key: "Path", value: url.path),
+                ]
+            )
+        }
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
