@@ -81,8 +81,9 @@ struct XcodeStorage: Sendable {
 
     /// `item` must come from `DeletionPlan.deletableItems`; a protected item traps.
     ///
-    /// - Throws: `RemovalInterrupted` if cancelled once the move or removing command began;
-    ///   `CancellationError` if cancelled before it.
+    /// - Throws: `CancellationError` if cancellation is seen before the removing step is called;
+    ///   `RemovalInterrupted` if the step itself ends in cancellation, which may be before it took
+    ///   effect or launched.
     fileprivate func remove(_ item: StorageItem) async throws {
         switch item.deletionMethod {
         case let .trashFile(url):
@@ -96,11 +97,12 @@ struct XcodeStorage: Sendable {
         }
     }
 
-    /// Runs the step that removes an item, reporting cancellation during it as `RemovalInterrupted`.
+    /// Runs the step that removes an item, reporting its cancellation as `RemovalInterrupted`.
     ///
-    /// Cancellation seen before the step starts stays `CancellationError`: nothing was removed. A
-    /// runner can't say whether a cancelled command launched, so a cancel after the step starts may
-    /// have stopped it before launch too; `RemovalInterrupted` means "may have been removed".
+    /// Cancellation seen before calling `removal` stays `CancellationError`: nothing was removed.
+    /// Cancellation that `removal` ends in becomes `RemovalInterrupted`, meaning "may have been
+    /// removed": a runner can't say whether a cancelled command launched, so this includes a
+    /// command stopped before launch.
     static func removing(_ removal: () async throws -> Void) async throws {
         guard !Task.isCancelled else { throw CancellationError() }
         do {
