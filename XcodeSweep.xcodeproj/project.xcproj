@@ -17,6 +17,7 @@
       "children": [
         { "path": "Assets.xcassets", "target-membership": [ "XcodeSweep/resources" ] },
         { "path": "XcodeSweep.icon", "target-membership": [ "XcodeSweep/resources" ] },
+        { "path": "LogContext.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
         { "path": "XcodeSweep.entitlements" },
         {
           "kind": "group",
@@ -55,6 +56,7 @@
           "path": "Storage",
           "children": [
             { "path": "DirectorySizer.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "FolderWalkLimiter.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "FileTrashing.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "ProcessRunner.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "XcodeStorage+CoreSimulator.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
@@ -70,8 +72,10 @@
       "path": "XcodeSweepTests",
       "children": [
         { "path": "AppSceneTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "DeletionLoggingTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DeletionPlanTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DirectorySizerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "FolderWalkLimiterTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "ParkedCallsTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "ProcessRunnerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "TestSupport.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },

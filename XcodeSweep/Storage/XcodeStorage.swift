@@ -40,6 +40,9 @@ struct XcodeStorage: Sendable {
     let fileTrasher: any FileTrashing
     /// The clock that stamps scans and ages items.
     let now: @Sendable () -> Date
+    /// Shared by every category. Caps walks at `activeProcessorCount - 2`, at least one, meant to
+    /// leave pool threads for categories that are ready to report.
+    let folderWalkLimiter = FolderWalkLimiter(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
 
     init(
         xcodeRootURL: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -80,10 +83,14 @@ struct XcodeStorage: Sendable {
     }
 
     /// `item` must come from `DeletionPlan.deletableItems`; a protected item traps.
+    ///
+    /// - Throws: `CancellationError` if cancellation is seen before the removing step is called;
+    ///   `RemovalInterrupted` if the step itself ends in cancellation, which may be before it took
+    ///   effect or launched.
     fileprivate func remove(_ item: StorageItem) async throws {
         switch item.deletionMethod {
         case let .trashFile(url):
-            try await fileTrasher.trashItem(at: url)
+            try await Self.removing { try await fileTrasher.trashItem(at: url) }
         case let .simctlDevice(udid):
             try await deleteSimulatorDevice(udid: udid)
         case let .simctlRuntime(identifier):
@@ -93,21 +100,38 @@ struct XcodeStorage: Sendable {
         }
     }
 
+    /// Runs the step that removes an item, reporting its cancellation as `RemovalInterrupted`.
+    ///
+    /// Cancellation seen before calling `removal` stays `CancellationError`: nothing was removed.
+    /// Cancellation that `removal` ends in becomes `RemovalInterrupted`, meaning "may have been
+    /// removed": a runner can't say whether a cancelled command launched, so this includes a
+    /// command stopped before launch.
+    static func removing(_ removal: () async throws -> Void) async throws {
+        guard !Task.isCancelled else { throw CancellationError() }
+        do {
+            try await removal()
+        } catch is CancellationError {
+            throw RemovalInterrupted()
+        }
+    }
+
     // MARK: - Shared Internal Helpers
 
-    /// Inspects `inputs` concurrently, returning the items found sorted largest first.
+    /// Inspects `inputs` concurrently, as many at once as `limiter` allows in one lane of its own,
+    /// returning the items found sorted largest first.
     ///
-    /// A child already cancelled when it starts skips its input, and an input whose `inspect` throws
-    /// contributes no item; the inspections here throw only on cancellation.
+    /// A child whose cancellation is seen before it holds a permit skips its input, and an input
+    /// whose `inspect` throws contributes no item; the inspections here throw only on cancellation.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
+        limiter: FolderWalkLimiter,
         inspect: @escaping @Sendable (Input) throws -> StorageItem?
     ) async -> [StorageItem] {
-        await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
+        let lane = limiter.makeLane()
+        return await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for input in inputs {
                 group.addTask {
-                    guard !Task.isCancelled else { return nil }
-                    return try? inspect(input)
+                    try? await limiter.withPermit(in: lane) { try? inspect(input) }
                 }
             }
 
@@ -163,6 +187,32 @@ struct XcodeStorage: Sendable {
             current = parent
         }
         return current
+    }
+}
+
+/// Cancellation after an item's removal began, so the item may be gone.
+struct RemovalInterrupted: Error {}
+
+// MARK: - Deletion Logging
+
+private extension DeletionMethod {
+    var logName: String {
+        switch self {
+        case .trashFile: "trash"
+        case .simctlDevice: "simctlDevice"
+        case .simctlRuntime: "simctlRuntime"
+        case .notDeletable: "none"
+        }
+    }
+
+    /// The path, device UDID, or runtime identifier being removed.
+    var logTarget: String {
+        switch self {
+        case let .trashFile(url): url.path
+        case let .simctlDevice(udid): udid
+        case let .simctlRuntime(identifier): identifier
+        case .notDeletable: ""
+        }
     }
 }
 
@@ -366,6 +416,11 @@ private struct DeletionStream: AsyncSequence, Sendable {
             case done
         }
 
+        /// Targets and reasons are public: the log is the user's record of what left their own
+        /// developer folders, and redacted entries couldn't serve as one. Nothing logs below notice,
+        /// the lowest level the system keeps on disk by default.
+        private static let logger = LogContext.deletion.logger
+
         private let storage: XcodeStorage
         private let items: [StorageItem]
         private var phase: Phase
@@ -415,13 +470,34 @@ private struct DeletionStream: AsyncSequence, Sendable {
 
                 do {
                     try await storage.remove(item)
+                    Self.logger.notice("""
+                    outcome=removed method=\(item.deletionMethod.logName, privacy: .public) \
+                    bytes=\(item.sizeBytes, privacy: .public) target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
                     removed.append(item)
                     reclaimedBytes += item.sizeBytes
                     return .deleted(itemID: item.id, progress: progress(completing: index))
+                } catch is RemovalInterrupted {
+                    // A stopped trash move or simctl command may still have taken effect.
+                    Self.logger.notice("""
+                    outcome=unknown method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
+                    phase = .done
+                    throw CancellationError()
                 } catch is CancellationError {
+                    Self.logger.notice("""
+                    outcome=skipped method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
                     phase = .done
                     throw CancellationError()
                 } catch {
+                    Self.logger.error("""
+                    outcome=failed method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public) \
+                    reason=\(error.localizedDescription, privacy: .public)
+                    """)
                     let failure = DeletionFailure(
                         itemID: item.id,
                         itemName: item.name,
