@@ -665,7 +665,7 @@ struct XcodeSweepStoreTests {
         let device = makeStorageItem(
             id: "sim",
             category: .simulatorDevices,
-            method: .simctlDevice(udid: "UDID-1", isBooted: false)
+            method: .simctlDevice(udid: "UDID-1")
         )
 
         // Given: a deletion whose simctl delete is in flight
@@ -806,7 +806,7 @@ enum StoreOperation: CaseIterable, Sendable {
             store.startDeletion(DeletionPlan(selection: [makeStorageItem(
                 id: "sim",
                 category: .simulatorDevices,
-                method: .simctlDevice(udid: "UDID-1", isBooted: false)
+                method: .simctlDevice(udid: "UDID-1")
             )]))
         }
     }

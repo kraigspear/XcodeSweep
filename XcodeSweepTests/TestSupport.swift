@@ -173,8 +173,12 @@ struct StubCommandRunner: CommandRunning, Sendable {
     var runtimesJSON = #"{}"#
     var devicesError: (any Error)?
     var runtimesError: (any Error)?
+    var shutdownError: (any Error)?
 
     func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
+        if arguments.starts(with: ["simctl", "shutdown"]), let shutdownError {
+            throw shutdownError
+        }
         switch arguments {
         case ["simctl", "list", "devices", "-j"]:
             if let devicesError {

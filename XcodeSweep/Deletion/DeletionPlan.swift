@@ -36,10 +36,10 @@ struct DeletionPlan: Identifiable, Hashable, Sendable {
         deletableItems.filter(\.deletionMethod.isPermanent).count
     }
 
-    /// Simulators marked booted at scan time; deletion tries to shut them down first.
-    var bootedDeviceCount: Int {
+    /// Simulator devices, which deletion shuts down first if running.
+    var deviceCount: Int {
         deletableItems.filter {
-            if case .simctlDevice(_, isBooted: true) = $0.deletionMethod {
+            if case .simctlDevice = $0.deletionMethod {
                 return true
             }
             return false
@@ -79,10 +79,10 @@ struct DeletionPlan: Identifiable, Hashable, Sendable {
                 "\(permanentCount) simulator \(plural("item", permanentCount)) will be permanently deleted using xcrun simctl."
             )
         }
-        if bootedDeviceCount > 0 {
-            parts.append(
-                "\(bootedDeviceCount) booted \(plural("simulator", bootedDeviceCount)) will be shut down first."
-            )
+        if deviceCount > 0 {
+            parts.append(deviceCount == 1
+                ? "The simulator will be shut down first if it's running."
+                : "Simulators will be shut down first if they're running.")
         }
 
         return "Estimated space to reclaim: \(formattedSize).\n\n" + parts.joined(separator: " ")
@@ -135,10 +135,8 @@ extension DeletionMethod {
         switch self {
         case .trashFile:
             "Moves folder to Trash (reversible)"
-        case let .simctlDevice(_, isBooted):
-            isBooted
-                ? "Shuts down simulator, then permanently deletes via xcrun simctl"
-                : "Permanently deletes via xcrun simctl delete"
+        case .simctlDevice:
+            "Shuts down simulator if running, then permanently deletes via xcrun simctl"
         case .simctlRuntime:
             "Permanently deletes runtime disk image via xcrun simctl runtime delete"
         case let .notDeletable(reason):

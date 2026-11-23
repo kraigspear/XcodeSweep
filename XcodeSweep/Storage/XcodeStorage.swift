@@ -84,8 +84,8 @@ struct XcodeStorage: Sendable {
         switch item.deletionMethod {
         case let .trashFile(url):
             try await fileTrasher.trashItem(at: url)
-        case let .simctlDevice(udid, isBooted):
-            try await deleteSimulatorDevice(udid: udid, isBooted: isBooted)
+        case let .simctlDevice(udid):
+            try await deleteSimulatorDevice(udid: udid)
         case let .simctlRuntime(identifier):
             try await deleteSimulatorRuntime(identifier: identifier)
         case .notDeletable:

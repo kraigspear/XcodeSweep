@@ -36,12 +36,12 @@
             previewItem(
                 "sim-booted", .simulatorDevices, "iPhone 17 Pro", "iOS 27.0",
                 gigabytes: 6.4, daysAgo: 0, status: .booted,
-                method: .simctlDevice(udid: "PREVIEW-BOOTED", isBooted: true)
+                method: .simctlDevice(udid: "PREVIEW-BOOTED")
             ),
             previewItem(
                 "sim-unavailable", .simulatorDevices, "iPhone 15", "iOS 17.5",
                 gigabytes: 3.7, daysAgo: 400, status: .unavailable,
-                method: .simctlDevice(udid: "PREVIEW-UNAVAILABLE", isBooted: false)
+                method: .simctlDevice(udid: "PREVIEW-UNAVAILABLE")
             ),
             previewItem(
                 "rt-current", .simulatorRuntimes, "iOS 27.0", "Build 24A5300",
