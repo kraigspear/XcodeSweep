@@ -22,6 +22,7 @@ Custom DerivedData and Archives locations set in Xcode's Settings → Locations 
 - Filesystem items (`DerivedData`, `DeviceSupport`, leftover preview folders, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible. If `simctl` can't list the preview set, preview folders are protected, since any of them might be registered.
 - Simulator devices, registered preview devices, and runtime disk images are removed through **`xcrun simctl`** after explicit confirmation (XcodeSweep tries to shut each simulator down first).
 - Every removal, failure, and item stopped mid-removal is recorded in the unified log: `/usr/bin/log show --last 1d --predicate 'subsystem == "com.kraigspear.XcodeSweep"'`.
+- Quitting during a cleanup asks first: Stop and Quit finishes or stops the item in progress, removes nothing after it, then quits; Keep Running cancels the quit. The window can't be closed while a cleanup runs.
 - App Sandbox is intentionally disabled (`com.apple.security.app-sandbox = false`) so the app can inspect `~/Library/Developer/` and invoke `/usr/bin/xcrun simctl`.
 
 ## Requirements

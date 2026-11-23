@@ -75,6 +75,9 @@ final class XcodeSweepStore {
     private let xcodeStorage: XcodeStorage
     @ObservationIgnored
     private var operationTask: Task<Void, Never>?
+    /// Set once the app is quitting: a stopped deletion then skips its rescan, which nothing would show.
+    @ObservationIgnored
+    private var isTerminating = false
 
     // MARK: - Derived Lifecycle Queries
 
@@ -95,6 +98,17 @@ final class XcodeSweepStore {
     /// The store stays busy until teardown completes, keeping scans and deletions mutually exclusive.
     func cancelOperation() {
         operationTask?.cancel()
+    }
+
+    /// Stops the running scan or deletion for good, returning once it has torn down.
+    ///
+    /// For quitting: unlike `cancelOperation()`, a stopped deletion isn't followed by a rescan.
+    /// The store doesn't expect to run another operation afterward.
+    func stopForTermination() async {
+        isTerminating = true
+        guard let task = operationTask else { return }
+        task.cancel()
+        await task.value
     }
 
     // MARK: - Scanning
@@ -305,6 +319,11 @@ final class XcodeSweepStore {
         let task = Task { [weak self] in
             guard let self else { return }
             await self.runDeletion(plan)
+            guard !self.isTerminating else {
+                self.operation = .idle
+                self.operationTask = nil
+                return
+            }
             // Hand the slot straight to the rescan, so the store is never idle between the phases.
             await self.beginRefresh().value
         }

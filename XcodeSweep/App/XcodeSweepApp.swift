@@ -23,12 +23,17 @@ private struct TestHostApp: App {
 }
 
 struct XcodeSweepApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var xcodeSweepStore = XcodeSweepStore()
 
     var body: some Scene {
         // One window: the store holds selection, search, and dialog state that a second window would share.
         Window("XcodeSweep", id: "main") {
             ContentView(store: xcodeSweepStore)
+                // Closing the only window quits the app; while a cleanup runs, quitting goes
+                // through the confirmation in `AppDelegate` instead.
+                .windowDismissBehavior(xcodeSweepStore.operation.isDeleting ? .disabled : .automatic)
+                .onAppear { appDelegate.xcodeSweepStore = xcodeSweepStore }
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
@@ -61,5 +66,29 @@ struct XcodeSweepApp: App {
                 .keyboardShortcut("i", modifiers: [.command, .option])
             }
         }
+    }
+}
+
+/// Asks before quitting during a cleanup, and stops it cleanly if the user agrees.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var xcodeSweepStore: XcodeSweepStore?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // A scan only reads, so quitting during one needs no question.
+        guard let xcodeSweepStore, xcodeSweepStore.operation.isDeleting else { return .terminateNow }
+
+        let alert = NSAlert()
+        alert.messageText = "A cleanup is still running"
+        alert.informativeText = "Stop it and quit? The item being removed now is finished or stopped, and nothing after it is removed."
+        alert.addButton(withTitle: "Stop and Quit")
+        alert.addButton(withTitle: "Keep Running")
+        guard alert.runModal() == .alertFirstButtonReturn else { return .terminateCancel }
+
+        Task {
+            await xcodeSweepStore.stopForTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
