@@ -294,32 +294,6 @@ struct XcodeStorageCancellationTests {
     }
 }
 
-private actor AsyncSignal {
-    private var signalled = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-
-    func signal() {
-        signalled = true
-        let pending = waiters
-        waiters.removeAll()
-        for waiter in pending {
-            waiter.resume()
-        }
-    }
-
-    func wait() async {
-        if signalled {
-            return
-        }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            if signalled {
-                continuation.resume()
-            } else {
-                waiters.append(continuation)
-            }
-        }
-    }
-}
 
 private actor IgnoreCancelShutdownRunner: CommandRunning {
     private(set) var recordedArguments: [[String]] = []

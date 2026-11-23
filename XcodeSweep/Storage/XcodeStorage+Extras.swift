@@ -29,7 +29,7 @@ extension XcodeStorage {
         }
 
         return await Self.scanConcurrently(candidates) { candidate in
-            let size = DirectorySizer.allocatedSize(of: candidate.url)
+            let size = try DirectorySizer.allocatedSize(of: candidate.url)
             let modified = Self.modificationDate(of: candidate.url)
             let status = StorageCategory.deviceSupport.ageStatus(lastUsed: modified, now: now)
 
@@ -72,7 +72,7 @@ extension XcodeStorage {
         }
 
         return await Self.scanConcurrently(directories) { url in
-            let size = DirectorySizer.allocatedSize(of: url)
+            let size = try DirectorySizer.allocatedSize(of: url)
             let modified = Self.modificationDate(of: url)
             let plist = Self.loadPlist(at: url.appendingPathComponent("device.plist"))
 
@@ -107,7 +107,7 @@ extension XcodeStorage {
 
     // MARK: - Archives & Caches
 
-    func scanArchivesAndCaches() async -> [StorageItem] {
+    func scanArchivesAndCaches() async throws(CancellationError) -> [StorageItem] {
         var items: [StorageItem] = []
         let fileManager = FileManager.default
 
@@ -115,7 +115,7 @@ extension XcodeStorage {
         let moduleCacheURL = xcodeRootURL
             .appendingPathComponent("DerivedData/\(Self.moduleCacheFolderName)", isDirectory: true)
         if fileManager.fileExists(atPath: moduleCacheURL.path) {
-            let size = DirectorySizer.allocatedSize(of: moduleCacheURL)
+            let size = try DirectorySizer.allocatedSize(of: moduleCacheURL)
             let modified = Self.modificationDate(of: moduleCacheURL)
             items.append(
                 StorageItem(
@@ -159,7 +159,7 @@ extension XcodeStorage {
             }
 
             let archiveItems = await Self.scanConcurrently(archiveURLs) { archiveURL in
-                Self.inspectArchive(at: archiveURL)
+                try Self.inspectArchive(at: archiveURL)
             }
             items.append(contentsOf: archiveItems)
         }
@@ -169,8 +169,8 @@ extension XcodeStorage {
 
     // MARK: - Private Archive Inspection
 
-    private static func inspectArchive(at url: URL) -> StorageItem {
-        let size = DirectorySizer.allocatedSize(of: url)
+    private static func inspectArchive(at url: URL) throws(CancellationError) -> StorageItem {
+        let size = try DirectorySizer.allocatedSize(of: url)
         var displayName = url.deletingPathExtension().lastPathComponent
         var versionSubtitle = "Xcode Archive"
         var creationDate = modificationDate(of: url)

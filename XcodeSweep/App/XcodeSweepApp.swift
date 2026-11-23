@@ -13,12 +13,16 @@ struct XcodeSweepApp: App {
         .commands {
             CommandGroup(after: .newItem) {
                 Button("Refresh Scan") {
-                    Task {
-                        await xcodeSweepStore.refresh()
-                    }
+                    xcodeSweepStore.startRefresh()
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(xcodeSweepStore.operation.isBusy)
+
+                Button(xcodeSweepStore.operation.isDeleting ? "Cancel Cleanup" : "Stop Scan") {
+                    xcodeSweepStore.cancelOperation()
+                }
+                .keyboardShortcut(".", modifiers: .command)
+                .disabled(!xcodeSweepStore.operation.isBusy)
             }
 
             CommandGroup(after: .pasteboard) {

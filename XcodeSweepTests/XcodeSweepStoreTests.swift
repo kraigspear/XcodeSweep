@@ -83,7 +83,7 @@ struct XcodeSweepStoreTests {
 
         // Simulate SwiftUI `.confirmationDialog(item:)` clearing the binding before the button's Task runs.
         store.pendingDeletion = nil
-        await store.confirmDeletion(pending)
+        await store.startDeletion(pending)?.value
 
         #expect(await trasher.trashedURLs == [orphanedURL])
         #expect(store.inventory.items(in: .derivedData).map(\.id) == [activeItem.id])
@@ -122,7 +122,7 @@ struct XcodeSweepStoreTests {
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
-        await store.refresh()
+        await store.startRefresh()?.value
         #expect(store.inventory.items(in: .derivedData).allSatisfy { $0.name == "SampleApp" })
 
         store.openCategoryAndSelectReclaimable(.derivedData)
@@ -130,7 +130,7 @@ struct XcodeSweepStoreTests {
 
         let pending = try #require(store.pendingDeletion)
         store.pendingDeletion = nil
-        await store.confirmDeletion(pending)
+        await store.startDeletion(pending)?.value
 
         #expect(await trasher.trashedURLs == [firstURL])
         #expect(store.inventory.items(in: .derivedData).map(\.path) == [secondURL])
@@ -175,7 +175,7 @@ struct XcodeSweepStoreTests {
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
 
-        await store.refresh()
+        await store.startRefresh()?.value
 
         let first = try #require(store.inventory.items(in: .derivedData).first { $0.path == firstURL })
         let second = try #require(store.inventory.items(in: .derivedData).first { $0.path == secondURL })
@@ -188,7 +188,7 @@ struct XcodeSweepStoreTests {
         let batch1 = try #require(store.pendingDeletion)
         store.pendingDeletion = nil
 
-        async let batch1Done: Void = store.confirmDeletion(batch1)
+        let batch1Task = store.startDeletion(batch1)
 
         let call1 = try await trasher.nextPendingCall()
         #expect(call1.url == firstURL)
@@ -209,7 +209,7 @@ struct XcodeSweepStoreTests {
         #expect(store.operation.deletionProgress?.removedBytes == first.sizeBytes)
 
         await trasher.resume(id: call2.id)
-        await batch1Done
+        await batch1Task?.value
 
         #expect(store.operation == .idle)
         #expect(!store.operation.isDeleting)
@@ -223,7 +223,7 @@ struct XcodeSweepStoreTests {
         let batch2 = try #require(store.pendingDeletion)
         store.pendingDeletion = nil
 
-        async let batch2Done: Void = store.confirmDeletion(batch2)
+        let batch2Task = store.startDeletion(batch2)
 
         let call3 = try await trasher.nextPendingCall()
         #expect(call3.url == thirdURL)
@@ -231,78 +231,11 @@ struct XcodeSweepStoreTests {
         #expect(store.operation.deletionProgress?.totalCount == 1)
         await trasher.resume(id: call3.id)
 
-        await batch2Done
+        await batch2Task?.value
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .derivedData).isEmpty)
         #expect(store.inventory.totalBytes == 0)
         #expect(store.lastDeletionReport?.deletedCount == 1)
-    }
-
-    @Test(
-        "Cancelling a multi-item batch keeps already-deleted items removed, leaves remaining items intact, and skips the completion alert",
-        .timeLimit(.minutes(1))
-    )
-    func cancelledMultiItemStoreBatchExitsCleanlyWithoutAlert() async throws {
-        let fixture = try TempXcodeFixture()
-        defer { fixture.cleanup() }
-
-        let now = testISO8601Date("2026-11-21T10:00:00Z")
-        let firstURL = try fixture.addDerivedData(
-            folderName: "Done-1",
-            workspacePath: "/nonexistent/Done.xcodeproj",
-            lastAccessed: now
-        )
-        let secondURL = try fixture.addDerivedData(
-            folderName: "Parked-2",
-            workspacePath: "/nonexistent/Parked.xcodeproj",
-            lastAccessed: now
-        )
-        let thirdURL = try fixture.addDerivedData(
-            folderName: "Untouched-3",
-            workspacePath: "/nonexistent/Untouched.xcodeproj",
-            lastAccessed: now
-        )
-
-        let trasher = ControllableFileTrasher()
-        let storage = XcodeStorage(
-            xcodeRootURL: fixture.xcodeRootURL,
-            commandRunner: StubCommandRunner(),
-            fileTrasher: trasher,
-            now: { now }
-        )
-        let store = XcodeSweepStore(xcodeStorage: storage)
-
-        await store.refresh()
-        let first = try #require(store.inventory.items(in: .derivedData).first { $0.path == firstURL })
-        let second = try #require(store.inventory.items(in: .derivedData).first { $0.path == secondURL })
-        let third = try #require(store.inventory.items(in: .derivedData).first { $0.path == thirdURL })
-
-        store.requestDelete(items: [first, second, third])
-        let pending = try #require(store.pendingDeletion)
-        store.pendingDeletion = nil
-
-        let batchTask = Task { @MainActor in
-            await store.confirmDeletion(pending)
-        }
-        defer { batchTask.cancel() }
-
-        // Complete item 1, then cancel while item 2 is parked.
-        let call1 = try await trasher.nextPendingCall()
-        #expect(call1.url == firstURL)
-        await trasher.resume(id: call1.id)
-
-        let call2 = try await trasher.nextPendingCall()
-        #expect(call2.url == secondURL)
-        batchTask.cancel()
-        await batchTask.value
-
-        #expect(store.operation == .idle)
-        #expect(!store.operation.isDeleting)
-        #expect(store.operation.deletionProgress == nil)
-        #expect(store.lastDeletionReport == nil)
-        #expect(store.errorMessage == nil)
-        #expect(await trasher.trashedURLs == [firstURL])
-        #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
     }
 
     @Test(
@@ -339,67 +272,6 @@ struct XcodeSweepStoreTests {
     }
 
     @Test(
-        "A cancelled rescan restores the last completed result, including warnings and totals",
-        .timeLimit(.minutes(1))
-    )
-    func cancelledRescanRestoresLastCompletedResult() async throws {
-        let fixture = try TempXcodeFixture()
-        defer { fixture.cleanup() }
-
-        let controller = ControllableCommandRunner()
-        let storage = XcodeStorage(
-            xcodeRootURL: fixture.xcodeRootURL,
-            commandRunner: controller,
-            fileTrasher: RecordingFileTrasher()
-        )
-        let store = XcodeSweepStore(xcodeStorage: storage)
-        try fixture.addDerivedData(
-            folderName: "Kept-1",
-            workspacePath: "/nonexistent/Kept.xcodeproj",
-            lastAccessed: Date.distantPast
-        )
-
-        // Given: a completed scan with one DerivedData item and a runtime warning
-        let firstScan = Task { await store.refresh() }
-        for _ in 0 ..< 2 {
-            let call = try await controller.nextPendingCall()
-            if call.arguments.contains("devices") {
-                await controller.resume(id: call.id, with: .success(
-                    CommandOutput(stdout: Data(#"{"devices":{}}"#.utf8), stderr: Data(), terminationStatus: 0)
-                ))
-            } else {
-                await controller.resume(id: call.id, with: .failure(TestTrashError(message: "runtime list failed")))
-            }
-        }
-        await firstScan.value
-        let completedInventory = store.inventory
-        let completedWarnings = store.scanWarnings
-        #expect(completedWarnings.count == 1)
-
-        // When: DerivedData changes, the rescan reports it, then the rescan is cancelled
-        try fixture.addDerivedData(
-            folderName: "Added-2",
-            workspacePath: "/nonexistent/Added.xcodeproj",
-            lastAccessed: Date.distantPast
-        )
-        let rescan = Task { await store.refresh() }
-        _ = try await controller.nextPendingCall()
-        _ = try await controller.nextPendingCall()
-        try await waitUntil("rescan reported new DerivedData") {
-            await store.inventory.items(in: .derivedData).count == 2
-        }
-        rescan.cancel()
-        await rescan.value
-
-        // Then
-        #expect(store.operation == .idle)
-        #expect(store.inventory.items(in: .derivedData).map(\.name) == ["Kept"])
-        #expect(store.inventory == completedInventory)
-        #expect(store.scanWarnings == completedWarnings)
-        #expect(store.completedCategories == Set(StorageCategory.allCases))
-    }
-
-    @Test(
         "Strictly enforces mutual exclusion: delete is blocked while scanning, and scan is blocked while deleting",
         .timeLimit(.minutes(1))
     )
@@ -422,13 +294,13 @@ struct XcodeSweepStoreTests {
         )
 
         // Seed one completed scan.
-        let firstScan = Task { await store.refresh() }
+        let firstScan = store.startRefresh()
         try await answerSimctl(controller)
-        await firstScan.value
+        await firstScan?.value
         let target = try #require(store.inventory.items(in: .derivedData).first)
 
         // 1. Start a rescan and park it in simctl; deletion must be completely rejected.
-        let rescan = Task { await store.refresh() }
+        let rescan = store.startRefresh()
         _ = try await controller.nextPendingCall()
         _ = try await controller.nextPendingCall()
 
@@ -436,11 +308,11 @@ struct XcodeSweepStoreTests {
         #expect(store.operation.isBusy)
         store.requestDelete(items: [target])
         #expect(store.pendingDeletion == nil)
-        await store.confirmDeletion(DeletionPlan(selection: [target]))
+        #expect(store.startDeletion(DeletionPlan(selection: [target])) == nil)
         #expect(await trasher.trashedURLs.isEmpty)
 
-        rescan.cancel()
-        await rescan.value
+        store.cancelOperation()
+        await rescan?.value
         #expect(store.operation == .idle)
 
         // 2. Start a deletion and park it in FileTrashing; refresh must be rejected.
@@ -448,16 +320,16 @@ struct XcodeSweepStoreTests {
         let pending = try #require(store.pendingDeletion)
         store.pendingDeletion = nil
 
-        let deleteTask = Task { await store.confirmDeletion(pending) }
+        let deleteTask = store.startDeletion(pending)
         let trashCall = try await trasher.nextPendingCall()
 
         #expect(store.operation.isDeleting)
         #expect(store.operation.isBusy)
-        await store.refresh() // must no-op immediately while deleting
+        #expect(store.startRefresh() == nil) // must no-op immediately while deleting
         #expect(await !controller.hasParkedCall)
 
         await trasher.resume(id: trashCall.id)
-        await deleteTask.value
+        await deleteTask?.value
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .derivedData).isEmpty)
     }
@@ -532,6 +404,191 @@ struct XcodeSweepStoreTests {
         #expect(store.selectedItemIDs == Set(reclaimableItems.map(\.id)))
     }
 
+    @Test(
+        "startRefresh owns the scan task, ignores overlapping starts, and cancelOperation restores the last completed scan",
+        .timeLimit(.minutes(1))
+    )
+    func startRefreshAndCancelOperationRestoresLastScanAndAllowsRetry() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher()
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+        try fixture.addDerivedData(
+            folderName: "Kept-1",
+            workspacePath: "/nonexistent/Kept.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+
+        // Seed one completed scan with one warning.
+        let initialScan = store.startRefresh()
+        for _ in 0 ..< 2 {
+            let call = try await controller.nextPendingCall()
+            if call.arguments.contains("devices") {
+                await controller.resume(id: call.id, with: .success(
+                    CommandOutput(stdout: Data(#"{"devices":{}}"#.utf8), stderr: Data(), terminationStatus: 0)
+                ))
+            } else {
+                await controller.resume(id: call.id, with: .failure(TestTrashError(message: "runtime list failed")))
+            }
+        }
+        await initialScan?.value
+        let completedInventory = store.inventory
+        let completedWarnings = store.scanWarnings
+
+        // Add another folder, start a rescan via startRefresh, and cancel via cancelOperation.
+        try fixture.addDerivedData(
+            folderName: "Added-2",
+            workspacePath: "/nonexistent/Added.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+
+        store.startRefresh()
+        #expect(store.operation.isScanning)
+        #expect(store.operation.isBusy)
+
+        // Overlapping startRefresh while busy must be ignored.
+        store.startRefresh()
+
+        let call1 = try await controller.nextPendingCall()
+        let call2 = try await controller.nextPendingCall()
+        try await waitUntil("rescan reported new DerivedData") {
+            await store.inventory.items(in: .derivedData).count == 2
+        }
+
+        store.cancelOperation()
+
+        try await controller.waitForCancellation(id: call1.id)
+        try await controller.waitForCancellation(id: call2.id)
+        try await waitUntil("store returns to idle after cancelOperation") {
+            await store.operation == .idle
+        }
+
+        #expect(store.inventory == completedInventory)
+        #expect(store.scanWarnings == completedWarnings)
+        #expect(store.errorMessage == nil)
+        #expect(await controller.recordedArguments.count == 4)
+
+        // A follow-up refresh after cancellation completes cleanly and picks up Added-2.
+        let followUp = store.startRefresh()
+        try await answerSimctl(controller)
+        await followUp?.value
+        #expect(store.operation == .idle)
+        #expect(store.inventory.items(in: .derivedData).count == 2)
+    }
+
+    @Test(
+        "cancelOperation stops an initial refreshIfNeeded scan and leaves the store unscanned",
+        .timeLimit(.minutes(1))
+    )
+    func cancelOperationStopsInitialRefreshIfNeeded() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let controller = ControllableCommandRunner()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher()
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+
+        let initialTask = Task { await store.refreshIfNeeded() }
+        let call1 = try await controller.nextPendingCall()
+        let call2 = try await controller.nextPendingCall()
+
+        store.cancelOperation()
+        await initialTask.value
+
+        try await controller.waitForCancellation(id: call1.id)
+        try await controller.waitForCancellation(id: call2.id)
+        #expect(store.operation == .idle)
+        #expect(!store.hasCompletedScan)
+        #expect(store.errorMessage == nil)
+    }
+
+    @Test(
+        "startDeletion owns the deletion task and cancelOperation stops mid-batch without showing a report",
+        .timeLimit(.minutes(1))
+    )
+    func startDeletionAndCancelOperationStopsMidBatch() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let firstURL = try fixture.addDerivedData(
+            folderName: "Done-1",
+            workspacePath: "/nonexistent/Done.xcodeproj",
+            lastAccessed: now
+        )
+        let secondURL = try fixture.addDerivedData(
+            folderName: "Parked-2",
+            workspacePath: "/nonexistent/Parked.xcodeproj",
+            lastAccessed: now
+        )
+        let thirdURL = try fixture.addDerivedData(
+            folderName: "Untouched-3",
+            workspacePath: "/nonexistent/Untouched.xcodeproj",
+            lastAccessed: now
+        )
+
+        let trasher = ControllableFileTrasher()
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: trasher,
+            now: { now }
+        )
+        let store = XcodeSweepStore(xcodeStorage: storage)
+
+        await store.startRefresh()?.value
+        let first = try #require(store.inventory.items(in: .derivedData).first { $0.path == firstURL })
+        let second = try #require(store.inventory.items(in: .derivedData).first { $0.path == secondURL })
+        let third = try #require(store.inventory.items(in: .derivedData).first { $0.path == thirdURL })
+
+        store.requestDelete(items: [first, second, third])
+        let pending = try #require(store.pendingDeletion)
+
+        store.startDeletion(pending)
+        #expect(store.pendingDeletion == nil)
+        #expect(store.operation.isDeleting)
+
+        let call1 = try await trasher.nextPendingCall()
+        #expect(call1.url == firstURL)
+        await trasher.resume(id: call1.id)
+
+        let call2 = try await trasher.nextPendingCall()
+        #expect(call2.url == secondURL)
+
+        store.cancelOperation()
+
+        try await trasher.waitForCancellation(id: call2.id)
+        try await waitUntil("deletion returns to idle after cancelOperation") {
+            await store.operation == .idle
+        }
+
+        #expect(store.lastDeletionReport == nil)
+        #expect(store.errorMessage == nil)
+        #expect(await trasher.trashedURLs == [firstURL])
+        #expect(Set(store.inventory.items(in: .derivedData).map(\.id)) == [second.id, third.id])
+    }
+
+    @Test("cancelOperation is a safe no-op when idle")
+    func cancelOperationWhenIdleIsNoOp() async throws {
+        let (store, fixture) = try await makeScannedStore()
+        defer { fixture.cleanup() }
+
+        store.cancelOperation()
+
+        #expect(store.operation == .idle)
+        #expect(store.errorMessage == nil)
+    }
+
     @Test("Rows hidden by search or filter are never part of the selection plan")
     func hiddenSelectedRowsAreExcludedFromDeletion() async throws {
         let (store, fixture) = try await makeScannedStore(extraDerivedDataFolders: ["OtherApp-new"])
@@ -560,6 +617,134 @@ struct XcodeSweepStoreTests {
         #expect(store.selectionPlan.isEmpty)
     }
 
+    /// Stop can't let the next operation in while the stopped one is still tearing down, such as a
+    /// cancelled simctl child that hasn't exited yet.
+    @Test("Stays busy until a stopped scan finishes tearing down", .timeLimit(.minutes(1)))
+    func stoppedScanBlocksNewOperationsUntilTeardownEnds() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let runner = SlowExitCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        ))
+        let target = makeStorageItem(id: "dd", method: .trashFile(fixture.rootURL.appendingPathComponent("dd")))
+
+        // Given: a scan whose simctl commands are both in flight
+        let scan = store.startRefresh()
+        try await waitUntil("both simctl commands started") { await runner.startedCount == 2 }
+
+        // When: Stop is pressed but the commands haven't exited yet
+        store.cancelOperation()
+
+        // Then: nothing new can start until they do
+        #expect(store.operation.isScanning)
+        #expect(store.startRefresh() == nil)
+        #expect(store.startDeletion(DeletionPlan(selection: [target])) == nil)
+
+        await runner.finishExiting()
+        let result = try await awaitResult(of: Task { await scan?.value }, within: .seconds(10))
+        _ = try result.get()
+        #expect(store.operation == .idle)
+        #expect(store.startRefresh() != nil)
+    }
+
+    @Test("Stays busy until a cancelled deletion's simctl command has exited", .timeLimit(.minutes(1)))
+    func cancelledDeletionBlocksNewOperationsUntilTeardownEnds() async throws {
+        let runner = SlowExitCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        ))
+        let device = makeStorageItem(
+            id: "sim",
+            category: .simulatorDevices,
+            method: .simctlDevice(udid: "UDID-1", isBooted: false)
+        )
+
+        // Given: a deletion whose simctl delete is in flight
+        let deletion = store.startDeletion(DeletionPlan(selection: [device]))
+        try await waitUntil("simctl delete started") { await runner.startedCount == 1 }
+
+        // When
+        store.cancelOperation()
+
+        // Then
+        #expect(store.operation.isDeleting)
+        #expect(store.startRefresh() == nil)
+        #expect(store.startDeletion(DeletionPlan(selection: [device])) == nil)
+
+        await runner.finishExiting()
+        let result = try await awaitResult(of: Task { await deletion?.value }, within: .seconds(10))
+        _ = try result.get()
+        #expect(store.operation == .idle)
+        #expect(store.lastDeletionReport == nil)
+    }
+
+    @Test(
+        "An operation started on a store that is then released never runs",
+        .timeLimit(.minutes(1)),
+        arguments: StoreOperation.allCases
+    )
+    func releasedStoreBeforeTaskEntryRunsNothing(operation: StoreOperation) async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let runner = SlowExitCommandRunner()
+        weak var weakStore: XcodeSweepStore?
+        var task: Task<Void, Never>?
+        do {
+            let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+                xcodeRootURL: fixture.xcodeRootURL,
+                commandRunner: runner,
+                fileTrasher: RecordingFileTrasher()
+            ))
+            weakStore = store
+            // The task can't start until this test suspends, so the store goes first.
+            task = operation.start(on: store)
+        }
+
+        #expect(task != nil)
+        #expect(weakStore == nil)
+        let result = try await awaitResult(of: Task { await task?.value }, within: .seconds(10))
+        _ = try result.get()
+        #expect(await runner.startedCount == 0)
+    }
+
+    @Test(
+        "A cancelled operation does not keep its store alive once teardown ends",
+        .timeLimit(.minutes(1)),
+        arguments: StoreOperation.allCases
+    )
+    func cancelledOperationReleasesStore(operation: StoreOperation) async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let runner = SlowExitCommandRunner()
+        weak var weakStore: XcodeSweepStore?
+        var task: Task<Void, Never>?
+        do {
+            let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+                xcodeRootURL: fixture.xcodeRootURL,
+                commandRunner: runner,
+                fileTrasher: RecordingFileTrasher()
+            ))
+            weakStore = store
+            task = operation.start(on: store)
+            try await waitUntil("commands started") { await runner.startedCount == operation.commandCount }
+            store.cancelOperation()
+        }
+
+        await runner.finishExiting()
+        let result = try await awaitResult(of: Task { await task?.value }, within: .seconds(10))
+        _ = try result.get()
+        task = nil
+        // Releases happen as the task's frames unwind, so poll briefly instead of asserting at once.
+        for _ in 0 ..< 100 where weakStore != nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(weakStore == nil)
+    }
+
     private func makeScannedStore(
         extraDerivedDataFolders: [String] = []
     ) async throws -> (XcodeSweepStore, TempXcodeFixture) {
@@ -579,7 +764,7 @@ struct XcodeSweepStoreTests {
             now: { now }
         )
         let store = XcodeSweepStore(xcodeStorage: storage)
-        await store.refresh()
+        await store.startRefresh()?.value
         return (store, fixture)
     }
 
@@ -590,6 +775,34 @@ struct XcodeSweepStoreTests {
             await controller.resume(id: call.id, with: .success(
                 CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
             ))
+        }
+    }
+}
+
+/// The two operations the store runs, for tests that must cover both task paths.
+enum StoreOperation: CaseIterable, Sendable {
+    case scan
+    case simctlDeletion
+
+    /// simctl commands the operation starts: both list commands, or one delete.
+    var commandCount: Int {
+        switch self {
+        case .scan: 2
+        case .simctlDeletion: 1
+        }
+    }
+
+    @MainActor
+    func start(on store: XcodeSweepStore) -> Task<Void, Never>? {
+        switch self {
+        case .scan:
+            store.startRefresh()
+        case .simctlDeletion:
+            store.startDeletion(DeletionPlan(selection: [makeStorageItem(
+                id: "sim",
+                category: .simulatorDevices,
+                method: .simctlDevice(udid: "UDID-1", isBooted: false)
+            )]))
         }
     }
 }

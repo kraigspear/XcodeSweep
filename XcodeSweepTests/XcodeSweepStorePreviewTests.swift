@@ -14,7 +14,7 @@
         func refresh_scansNoXcodeFolderAndRunsNoCommand() async {
             let store = XcodeSweepStore.preview()
 
-            await store.refresh()
+            await store.startRefresh()?.value
 
             let scanRoot = XcodeStorage.preview.xcodeRootURL
             #expect(
@@ -30,7 +30,7 @@
         /// Verifies a confirmed cleanup in a preview leaves real files and simulators alone.
         /// To replicate: in the DerivedData ContentView preview, click the inspector's delete button → confirm.
         @Test("Confirmed cleanup refuses every Trash move and simctl command")
-        func confirmDeletion_refusesTrashAndSimctl() async throws {
+        func startDeletion_refusesTrashAndSimctl() async throws {
             // Given: A real file and a simulator the user selected in a preview
             let fileURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent("XcodeSweepPreviewTests-\(UUID().uuidString)")
@@ -43,7 +43,7 @@
             let store = XcodeSweepStore.preview()
 
             // When
-            await store.confirmDeletion(plan)
+            await store.startDeletion(plan)?.value
 
             // Then: Both items were refused by the preview adapter and the file is still in place
             let report = try #require(store.lastDeletionReport)

@@ -97,16 +97,17 @@ struct XcodeStorage: Sendable {
 
     /// Inspects `inputs` concurrently, returning the items found sorted largest first.
     ///
-    /// Inputs not yet started when the task is cancelled are skipped.
+    /// A child already cancelled when it starts skips its input, and an input whose `inspect` throws
+    /// contributes no item; the inspections here throw only on cancellation.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
-        inspect: @escaping @Sendable (Input) -> StorageItem?
+        inspect: @escaping @Sendable (Input) throws -> StorageItem?
     ) async -> [StorageItem] {
         await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for input in inputs {
                 group.addTask {
                     guard !Task.isCancelled else { return nil }
-                    return inspect(input)
+                    return try? inspect(input)
                 }
             }
 
@@ -258,9 +259,10 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                     }
 
                     group.addTask {
-                        guard !Task.isCancelled else { return nil }
-                        let items = await storage.scanArchivesAndCaches()
-                        guard !Task.isCancelled else { return nil }
+                        guard !Task.isCancelled,
+                              let items = try? await storage.scanArchivesAndCaches(),
+                              !Task.isCancelled
+                        else { return nil }
                         return (.archivesAndCaches, items, nil)
                     }
 

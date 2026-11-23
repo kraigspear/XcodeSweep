@@ -12,7 +12,10 @@ struct ContentView: View {
         } detail: {
             VStack(spacing: 0) {
                 if let progress = store.operation.deletionProgress {
-                    DeletionProgressBar(progress: progress)
+                    DeletionProgressBar(
+                        progress: progress,
+                        onCancel: { store.cancelOperation() }
+                    )
                     Divider()
                 }
                 DetailRouterView(store: store)
@@ -28,15 +31,22 @@ struct ContentView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    Task {
-                        await store.refresh()
+                if store.operation.isScanning {
+                    Button {
+                        store.cancelOperation()
+                    } label: {
+                        Label("Stop", systemImage: "stop.fill")
                     }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
+                    .help("Stop scanning (⌘.)")
+                } else {
+                    Button {
+                        store.startRefresh()
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(store.operation.isBusy)
+                    .help("Rescan Xcode storage (⌘R)")
                 }
-                .disabled(store.operation.isBusy)
-                .help("Rescan Xcode storage (⌘R)")
 
                 Button {
                     store.inspectorPresented.toggle()
@@ -51,9 +61,7 @@ struct ContentView: View {
             item: $bindableStore.pendingDeletion
         ) { pending in
             Button(pending.actionTitle, role: .destructive) {
-                Task {
-                    await store.confirmDeletion(pending)
-                }
+                store.startDeletion(pending)
             }
             Button("Cancel", role: .cancel) {
                 store.pendingDeletion = nil
@@ -92,6 +100,7 @@ private struct DetailRouterView: View {
 
 private struct DeletionProgressBar: View {
     let progress: DeletionProgress
+    let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -115,6 +124,11 @@ private struct DeletionProgressBar: View {
                 Text("\(progress.completedCount) / \(progress.totalCount)")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
+
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Stop removing remaining items (⌘.)")
             }
 
             ProgressView(value: progress.fractionCompleted, total: 1)

@@ -74,22 +74,13 @@ final class XcodeSweepStore {
     var errorMessage: String?
 
     private let xcodeStorage: XcodeStorage
+    @ObservationIgnored
+    private var operationTask: Task<Void, Never>?
 
     // MARK: - Derived Lifecycle Queries
 
     var hasCompletedScan: Bool {
         inventory.scannedAt != nil
-    }
-
-    /// Categories whose results are in: those finished so far during a scan, otherwise every
-    /// category once any scan has completed.
-    var completedCategories: Set<StorageCategory> {
-        switch operation {
-        case let .scanning(completed):
-            completed
-        case .idle, .deleting:
-            hasCompletedScan ? Set(StorageCategory.allCases) : []
-        }
     }
 
     // MARK: - Initialization
@@ -98,20 +89,36 @@ final class XcodeSweepStore {
         self.xcodeStorage = xcodeStorage
     }
 
-    // MARK: - Scanning
+    // MARK: - Operations
 
-    /// Scans unless a scan has already completed.
-    func refreshIfNeeded() async {
-        guard !hasCompletedScan else { return }
-        await refresh()
+    /// Cancels the running scan or deletion, if any.
+    ///
+    /// The store stays busy until teardown completes, keeping scans and deletions mutually exclusive.
+    func cancelOperation() {
+        operationTask?.cancel()
     }
 
-    /// Rescans all categories, updating the inventory as each category finishes.
+    // MARK: - Scanning
+
+    /// Scans unless a scan has already completed, and cancels that scan if the caller is cancelled.
+    func refreshIfNeeded() async {
+        guard !hasCompletedScan, !Task.isCancelled, let task = startRefresh() else { return }
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    /// Starts rescanning all categories, updating the inventory as each category finishes.
     ///
-    /// Does nothing while busy. If the scan fails or is cancelled, the previous inventory is restored;
-    /// only a failure sets `errorMessage`.
-    func refresh() async {
-        guard !operation.isBusy else { return }
+    /// If the scan fails or is cancelled, the previous inventory is restored; only a failure sets
+    /// `errorMessage`. Call `cancelOperation()` to stop it.
+    ///
+    /// - Returns: The scan's task, for callers that wait on it; `nil` if busy, and nothing started.
+    @discardableResult
+    func startRefresh() -> Task<Void, Never>? {
+        guard !operation.isBusy else { return nil }
 
         let previousInventory = inventory
         let previousWarnings = scanWarnings
@@ -120,9 +127,29 @@ final class XcodeSweepStore {
         operation = .scanning(completed: [])
         scanWarnings = []
         errorMessage = nil
-        defer { operation = .idle }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.runRefresh(
+                previousInventory: previousInventory,
+                previousWarnings: previousWarnings
+            )
+        }
+        operationTask = task
+        return task
+    }
+
+    private func runRefresh(
+        previousInventory: StorageInventory,
+        previousWarnings: [String]
+    ) async {
+        defer {
+            operation = .idle
+            operationTask = nil
+        }
 
         do {
+            try Task.checkCancellation()
             var completed: Set<StorageCategory> = []
             for try await event in xcodeStorage.scan() {
                 switch event {
@@ -237,18 +264,36 @@ final class XcodeSweepStore {
         pendingDeletion = plan
     }
 
-    /// Deletes the plan's items, removing each from the inventory as it goes.
+    /// Starts deleting the plan's items, removing each from the inventory as it goes.
     ///
     /// Sets `lastDeletionReport` on completion. If cancelled, items already deleted stay removed
-    /// and no report is set.
-    func confirmDeletion(_ plan: DeletionPlan) async {
-        guard !operation.isBusy, !plan.isEmpty else { return }
+    /// and no report is set. Call `cancelOperation()` to stop it.
+    ///
+    /// - Returns: The deletion's task, for callers that wait on it; `nil` if busy or the plan is
+    ///   empty, and nothing started.
+    @discardableResult
+    func startDeletion(_ plan: DeletionPlan) -> Task<Void, Never>? {
+        guard !operation.isBusy, !plan.isEmpty else { return nil }
 
         pendingDeletion = nil
         operation = .deleting(nil)
-        defer { operation = .idle }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.runDeletion(plan)
+        }
+        operationTask = task
+        return task
+    }
+
+    private func runDeletion(_ plan: DeletionPlan) async {
+        defer {
+            operation = .idle
+            operationTask = nil
+        }
 
         do {
+            try Task.checkCancellation()
             for try await event in xcodeStorage.delete(plan) {
                 switch event {
                 case let .starting(progress):
