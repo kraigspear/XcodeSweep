@@ -28,11 +28,19 @@ extension XcodeStorage {
         let folders = entries.filter { url in
             (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
-        let isProject = { (url: URL) in
-            fileManager.fileExists(atPath: url.appendingPathComponent("info.plist").path)
-                || url.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
+        // One check per folder, so a plist appearing mid-classification can't put it in both lists or neither.
+        var projects: [URL] = []
+        var sharedCaches: [URL] = []
+        for folder in folders {
+            let isProject = fileManager.fileExists(atPath: folder.appendingPathComponent("info.plist").path)
+                || folder.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
+            if isProject {
+                projects.append(folder)
+            } else {
+                sharedCaches.append(folder)
+            }
         }
-        return (folders.filter(isProject), folders.filter { !isProject($0) })
+        return (projects, sharedCaches)
     }
 
     // MARK: - Private Inspection

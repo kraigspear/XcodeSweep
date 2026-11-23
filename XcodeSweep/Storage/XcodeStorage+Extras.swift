@@ -166,7 +166,7 @@ extension XcodeStorage {
             status: isModuleCache ? .stale : .active,
             deletionMethod: .trashFile(url),
             metadata: [
-                MetadataEntry(key: "Type", value: "Xcode Build Cache"),
+                MetadataEntry(key: "Type", value: isModuleCache ? "Xcode Build Cache" : "DerivedData Folder"),
                 MetadataEntry(key: "Path", value: url.path),
             ]
         )
