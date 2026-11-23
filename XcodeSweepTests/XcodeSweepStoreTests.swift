@@ -268,7 +268,7 @@ struct XcodeSweepStoreTests {
         // Then: deterministic teardown guarantees no stray updates, no error, and unscanned state
         #expect(store.inventory.scannedAt == nil)
         #expect(!store.hasCompletedScan)
-        #expect(store.scanWarnings.isEmpty)
+        #expect(store.scanFailures.isEmpty)
         #expect(store.operation == .idle)
     }
 
@@ -442,7 +442,7 @@ struct XcodeSweepStoreTests {
         }
         await initialScan?.value
         let completedInventory = store.inventory
-        let completedWarnings = store.scanWarnings
+        let completedWarnings = store.scanFailures
 
         // Add another folder, start a rescan via startRefresh, and cancel via cancelOperation.
         try fixture.addDerivedData(
@@ -476,7 +476,7 @@ struct XcodeSweepStoreTests {
         }
 
         #expect(store.inventory == completedInventory)
-        #expect(store.scanWarnings == completedWarnings)
+        #expect(store.scanFailures == completedWarnings)
         #expect(await controller.recordedArguments.count == 2 * scanSimctlListCallCount)
 
         // A follow-up refresh after cancellation completes cleanly and picks up Added-2.

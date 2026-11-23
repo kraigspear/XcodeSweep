@@ -244,7 +244,7 @@ struct XcodeStorageCancellationTests {
         let events = reportedEvents.withLock { $0 }
         for event in events {
             switch event {
-            case let .categoryScanned(category, _):
+            case let .categoryScanned(category, _, _):
                 #expect(category != .simulatorDevices)
                 #expect(category != .simulatorRuntimes)
             case .completed:

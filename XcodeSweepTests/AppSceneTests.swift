@@ -21,6 +21,37 @@ struct AppSceneTests {
         #expect(mainWindows.isEmpty)
     }
 
+    /// An empty category whose folder couldn't be read must not claim nothing is there.
+    /// To replicate: make a category's folder unreadable → scan → open the category.
+    @Test("An empty category that couldn't be scanned says so instead of Nothing Found")
+    func emptyFailedCategorySaysItCouldntScan() throws {
+        let failed = try recognizedText(in: CategoryEmptyStateView(
+            category: .deviceSupport, isScanning: false, failure: "Permission denied",
+            hasActiveFilter: false, onResetFilters: {}
+        ).frame(width: 500, height: 300))
+        let empty = try recognizedText(in: CategoryEmptyStateView(
+            category: .deviceSupport, isScanning: false, failure: nil,
+            hasActiveFilter: false, onResetFilters: {}
+        ).frame(width: 500, height: 300))
+
+        #expect(failed.contains { $0.contains("Scan Device Support") }, "Recognized: \(failed)")
+        #expect(!failed.contains { $0.contains("Nothing Found") }, "Recognized: \(failed)")
+        #expect(empty.contains { $0.contains("Nothing Found") }, "Recognized: \(empty)")
+    }
+
+    @Test("A category row in the sidebar marks a failed scan")
+    func sidebarRowMarksFailedScan() throws {
+        let metrics = CategoryMetrics(category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0)
+
+        let failed = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: "Permission denied")
+            .frame(width: 260))
+        let clean = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: nil)
+            .frame(width: 260))
+
+        #expect(failed.contains { $0.contains("Scan incomplete") }, "Recognized: \(failed)")
+        #expect(!clean.contains { $0.contains("Scan incomplete") }, "Recognized: \(clean)")
+    }
+
     /// The alert lists only the first four failures; this list is where the rest are seen.
     /// To replicate: clean up six items where five or more fail → Show All Failures → scroll the list.
     @Test("The failure list shows every failure with its reason")

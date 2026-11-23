@@ -6,7 +6,8 @@ struct ScanSnapshot: Equatable, Sendable {
     let itemsByCategory: [StorageCategory: [StorageItem]]
     /// The volume holding the Xcode folder; `nil` if it couldn't be read.
     let volume: DiskVolume?
-    let warnings: [String]
+    /// Why a category's scan is incomplete, for each category that couldn't be fully read.
+    let failures: [StorageCategory: String]
 }
 
 /// A volume's display name and capacity.
@@ -18,7 +19,8 @@ struct DiskVolume: Equatable, Sendable {
 
 /// Ordered lifecycle events emitted by `XcodeStorage.scan()`.
 enum ScanEvent: Equatable, Sendable {
-    case categoryScanned(StorageCategory, [StorageItem])
+    /// A category's items, and why its scan is incomplete, if it is.
+    case categoryScanned(StorageCategory, [StorageItem], failure: String?)
     case completed(ScanSnapshot)
 }
 
@@ -166,6 +168,21 @@ struct XcodeStorage: Sendable {
         }
     }
 
+    /// The entries of the folder at `url`, or none if it doesn't exist: a feature never used has no folder.
+    ///
+    /// - Throws: The error when the folder exists but can't be read, such as when access is denied.
+    static func folderEntries(of url: URL) throws -> [URL] {
+        do {
+            return try FileManager.default.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+                options: [.skipsHiddenFiles]
+            )
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        }
+    }
+
     /// The dictionary in the property list at `url`; `nil` if unreadable or not a dictionary.
     static func loadPlist(at url: URL) -> [String: Any]? {
         guard let data = try? Data(contentsOf: url),
@@ -295,7 +312,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                         guard !Task.isCancelled else { return nil }
                         let items = await storage.scanDerivedData(derivedData.projects, now: referenceDate)
                         guard !Task.isCancelled else { return nil }
-                        return (.derivedData, items, nil)
+                        return (.derivedData, items, derivedData.failure)
                     }
 
                     group.addTask {
@@ -305,7 +322,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                         } catch is CancellationError {
                             return nil
                         } catch {
-                            return (.simulatorDevices, [], "Simulator Devices: \(error.localizedDescription)")
+                            return (.simulatorDevices, [], error.localizedDescription)
                         }
                     }
 
@@ -316,51 +333,49 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                         } catch is CancellationError {
                             return nil
                         } catch {
-                            return (.simulatorRuntimes, [], "Simulator Runtimes: \(error.localizedDescription)")
+                            return (.simulatorRuntimes, [], error.localizedDescription)
                         }
                     }
 
                     group.addTask {
                         guard !Task.isCancelled else { return nil }
-                        let items = await storage.scanDeviceSupport(now: referenceDate)
+                        let deviceSupport = await storage.scanDeviceSupport(now: referenceDate)
                         guard !Task.isCancelled else { return nil }
-                        return (.deviceSupport, items, nil)
+                        return (.deviceSupport, deviceSupport.items, deviceSupport.failure)
                     }
 
                     group.addTask {
                         guard !Task.isCancelled else { return nil }
                         let previews = await storage.scanPreviews(now: referenceDate)
                         guard !Task.isCancelled else { return nil }
-                        return (.previews, previews.items, previews.warning)
+                        return (.previews, previews.items, previews.failure)
                     }
 
                     group.addTask {
                         guard !Task.isCancelled,
-                              let items = try? await storage.scanArchivesAndCaches(sharedCaches: derivedData.sharedCaches),
+                              let archives = try? await storage.scanArchivesAndCaches(sharedCaches: derivedData.sharedCaches),
                               !Task.isCancelled
                         else { return nil }
-                        return (.archivesAndCaches, items, nil)
+                        return (.archivesAndCaches, archives.items, archives.failure)
                     }
 
                     var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
-                    var warnings: [String] = []
+                    var failures: [StorageCategory: String] = [:]
 
-                    for await case let (category, items, warning)? in group {
+                    for await case let (category, items, failure)? in group {
                         if Task.isCancelled {
                             continue
                         }
                         itemsByCategory[category] = items
-                        if let warning {
-                            warnings.append(warning)
-                        }
-                        continuation.yield(.categoryScanned(category, items))
+                        failures[category] = failure
+                        continuation.yield(.categoryScanned(category, items, failure: failure))
                     }
 
                     return ScanSnapshot(
                         scannedAt: referenceDate,
                         itemsByCategory: itemsByCategory,
                         volume: volume,
-                        warnings: warnings
+                        failures: failures
                     )
                 }
 

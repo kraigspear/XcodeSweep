@@ -16,16 +16,17 @@ extension XcodeStorage {
     /// A project folder is named `<Project>-<28 lowercase letters>`, or has an `info.plist`; in a
     /// custom folder that plist must be Xcode's, recording a `WorkspacePath`. In the default folder
     /// anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
-    func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
+    ///
+    /// `failure` says why the folder couldn't be read; a missing folder is simply empty.
+    func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL], failure: String?) {
         let derivedDataURL = xcodeLocations.derivedDataURL
         let isCustom = xcodeLocations.hasCustomDerivedData
         let fileManager = FileManager.default
-        guard let entries = try? fileManager.contentsOfDirectory(
-            at: derivedDataURL,
-            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return ([], [])
+        let entries: [URL]
+        do {
+            entries = try Self.folderEntries(of: derivedDataURL)
+        } catch {
+            return ([], [], error.localizedDescription)
         }
 
         let folders = entries.filter { url in
@@ -48,7 +49,7 @@ extension XcodeStorage {
                 sharedCaches.append(folder)
             }
         }
-        return (projects, sharedCaches)
+        return (projects, sharedCaches, nil)
     }
 
     // MARK: - Private Inspection

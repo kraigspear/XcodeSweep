@@ -16,8 +16,8 @@ struct OverviewView: View {
                     isScanning: store.operation.isScanning
                 )
 
-                if !store.scanWarnings.isEmpty {
-                    ScanWarningsBanner(warnings: store.scanWarnings)
+                if !store.scanFailures.isEmpty {
+                    ScanFailuresBanner(failures: store.scanFailures)
                 }
 
                 StorageBreakdownChartCard(metrics: store.inventory.categoryMetrics)
@@ -25,6 +25,7 @@ struct OverviewView: View {
                 CategoryGridSection(
                     metrics: store.inventory.categoryMetrics,
                     isCategoryScanning: { store.operation.isScanning($0) },
+                    scanFailure: { store.scanFailures[$0] },
                     onOpenCategory: { category in
                         store.navigate(to: .category(category))
                     },
@@ -181,6 +182,7 @@ private struct StorageBreakdownChartCard: View {
 private struct CategoryGridSection: View {
     let metrics: [CategoryMetrics]
     let isCategoryScanning: (StorageCategory) -> Bool
+    let scanFailure: (StorageCategory) -> String?
     let onOpenCategory: (StorageCategory) -> Void
     let onSelectReclaimable: (StorageCategory) -> Void
 
@@ -198,6 +200,7 @@ private struct CategoryGridSection: View {
                     CategoryCardView(
                         metrics: metric,
                         isScanning: isCategoryScanning(metric.category),
+                        failure: scanFailure(metric.category),
                         onOpen: { onOpenCategory(metric.category) },
                         onSelectReclaimable: { onSelectReclaimable(metric.category) }
                     )
@@ -210,6 +213,7 @@ private struct CategoryGridSection: View {
 private struct CategoryCardView: View {
     let metrics: CategoryMetrics
     let isScanning: Bool
+    let failure: String?
     let onOpen: () -> Void
     let onSelectReclaimable: () -> Void
 
@@ -232,6 +236,10 @@ private struct CategoryCardView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
+
+            if let failure, !isScanning {
+                ScanFailureBadge(failure: failure)
+            }
 
             Spacer(minLength: 4)
 
@@ -263,17 +271,17 @@ private struct CategoryCardView: View {
     }
 }
 
-private struct ScanWarningsBanner: View {
-    let warnings: [String]
+private struct ScanFailuresBanner: View {
+    let failures: [StorageCategory: String]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("Some scanners reported warnings", systemImage: "exclamationmark.triangle.fill")
+            Label("Some categories couldn't be fully scanned", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
                 .foregroundStyle(.orange)
 
-            ForEach(warnings, id: \.self) { warning in
-                Text(warning)
+            ForEach(StorageCategory.allCases.filter { failures[$0] != nil }) { category in
+                Text("\(category.title): \(failures[category] ?? "")")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
