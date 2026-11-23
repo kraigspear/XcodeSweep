@@ -34,24 +34,48 @@ enum DeletionEvent: Equatable, Sendable {
 struct XcodeStorage: Sendable {
     static let xcrunURL = URL(fileURLWithPath: "/usr/bin/xcrun")
 
-    /// The Xcode data folder, `~/Library/Developer/Xcode` by default.
-    let xcodeRootURL: URL
+    /// Where the scanned folders are.
+    let xcodeLocations: XcodeLocations
     let commandRunner: any CommandRunning
     let fileTrasher: any FileTrashing
     /// The clock that stamps scans and ages items.
     let now: @Sendable () -> Date
+    /// Shared by every category. Caps walks at `activeProcessorCount - 2`, at least one, meant to
+    /// leave pool threads for categories that are ready to report.
+    let folderWalkLimiter = FolderWalkLimiter(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
 
     init(
-        xcodeRootURL: URL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Developer/Xcode", isDirectory: true),
+        xcodeLocations: XcodeLocations = .current(),
         commandRunner: any CommandRunning = ProcessRunner(),
         fileTrasher: any FileTrashing = LiveFileTrasher(),
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.xcodeRootURL = xcodeRootURL
+        self.xcodeLocations = xcodeLocations
         self.commandRunner = commandRunner
         self.fileTrasher = fileTrasher
         self.now = now
+    }
+
+    /// Storage for the Xcode folder at `xcodeRootURL`, with DerivedData and archives in it.
+    ///
+    /// Xcode's Locations settings belong to the real Xcode folder, so they aren't read here.
+    init(
+        xcodeRootURL: URL,
+        commandRunner: any CommandRunning = ProcessRunner(),
+        fileTrasher: any FileTrashing = LiveFileTrasher(),
+        now: @escaping @Sendable () -> Date = Date.init
+    ) {
+        self.init(
+            xcodeLocations: XcodeLocations(xcodeRootURL: xcodeRootURL),
+            commandRunner: commandRunner,
+            fileTrasher: fileTrasher,
+            now: now
+        )
+    }
+
+    /// The Xcode data folder, `~/Library/Developer/Xcode` for the real Xcode.
+    var xcodeRootURL: URL {
+        xcodeLocations.xcodeRootURL
     }
 
     // MARK: - Scanning
@@ -62,7 +86,7 @@ struct XcodeStorage: Sendable {
     /// during `next()`, child scan tasks are cancelled, full producer teardown is awaited, and
     /// `CancellationError` is thrown. Breaking out of iteration early requests producer
     /// cancellation on iterator release without awaiting teardown or throwing.
-    func scan() -> some AsyncSequence<ScanEvent, any Error> & Sendable {
+    func scan() -> some AsyncSequence<ScanEvent, CancellationError> & Sendable {
         StructuredScanStream(storage: self)
     }
 
@@ -75,17 +99,21 @@ struct XcodeStorage: Sendable {
     /// Cancellation is cooperative: once observed, no subsequent items are started and `CancellationError`
     /// is never recorded as a `DeletionFailure`; an in-flight `FileTrashing` move that cannot be interrupted
     /// may complete and emit its outcome before cancellation is thrown on the next pull.
-    func delete(_ plan: DeletionPlan) -> some AsyncSequence<DeletionEvent, any Error> & Sendable {
+    func delete(_ plan: DeletionPlan) -> some AsyncSequence<DeletionEvent, CancellationError> & Sendable {
         DeletionStream(storage: self, items: plan.deletableItems)
     }
 
     /// `item` must come from `DeletionPlan.deletableItems`; a protected item traps.
+    ///
+    /// - Throws: `CancellationError` if cancellation is seen before the removing step is called;
+    ///   `RemovalInterrupted` if the step itself ends in cancellation, which may be before it took
+    ///   effect or launched.
     fileprivate func remove(_ item: StorageItem) async throws {
         switch item.deletionMethod {
         case let .trashFile(url):
-            try await fileTrasher.trashItem(at: url)
-        case let .simctlDevice(udid):
-            try await deleteSimulatorDevice(udid: udid)
+            try await Self.removing { try await fileTrasher.trashItem(at: url) }
+        case let .simctlDevice(udid, deviceSet):
+            try await deleteSimulatorDevice(udid: udid, in: deviceSet)
         case let .simctlRuntime(identifier):
             try await deleteSimulatorRuntime(identifier: identifier)
         case .notDeletable:
@@ -93,21 +121,38 @@ struct XcodeStorage: Sendable {
         }
     }
 
+    /// Runs the step that removes an item, reporting its cancellation as `RemovalInterrupted`.
+    ///
+    /// Cancellation seen before calling `removal` stays `CancellationError`: nothing was removed.
+    /// Cancellation that `removal` ends in becomes `RemovalInterrupted`, meaning "may have been
+    /// removed": a runner can't say whether a cancelled command launched, so this includes a
+    /// command stopped before launch.
+    static func removing(_ removal: () async throws -> Void) async throws {
+        guard !Task.isCancelled else { throw CancellationError() }
+        do {
+            try await removal()
+        } catch is CancellationError {
+            throw RemovalInterrupted()
+        }
+    }
+
     // MARK: - Shared Internal Helpers
 
-    /// Inspects `inputs` concurrently, returning the items found sorted largest first.
+    /// Inspects `inputs` concurrently, as many at once as `limiter` allows in one lane of its own,
+    /// returning the items found sorted largest first.
     ///
-    /// A child already cancelled when it starts skips its input, and an input whose `inspect` throws
-    /// contributes no item; the inspections here throw only on cancellation.
+    /// A child whose cancellation is seen before it holds a permit skips its input, and an input
+    /// whose `inspect` throws contributes no item; the inspections here throw only on cancellation.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
+        limiter: FolderWalkLimiter,
         inspect: @escaping @Sendable (Input) throws -> StorageItem?
     ) async -> [StorageItem] {
-        await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
+        let lane = limiter.makeLane()
+        return await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for input in inputs {
                 group.addTask {
-                    guard !Task.isCancelled else { return nil }
-                    return try? inspect(input)
+                    try? await limiter.withPermit(in: lane) { try? inspect(input) }
                 }
             }
 
@@ -166,6 +211,33 @@ struct XcodeStorage: Sendable {
     }
 }
 
+/// Cancellation after an item's removal began, so the item may be gone.
+struct RemovalInterrupted: Error {}
+
+// MARK: - Deletion Logging
+
+private extension DeletionMethod {
+    var logName: String {
+        switch self {
+        case .trashFile: "trash"
+        case .simctlDevice(_, .standard): "simctlDevice"
+        case .simctlDevice(_, .previews): "simctlPreviewDevice"
+        case .simctlRuntime: "simctlRuntime"
+        case .notDeletable: "none"
+        }
+    }
+
+    /// The path, device UDID, or runtime identifier being removed.
+    var logTarget: String {
+        switch self {
+        case let .trashFile(url): url.path
+        case let .simctlDevice(udid, _): udid
+        case let .simctlRuntime(identifier): identifier
+        case .notDeletable: ""
+        }
+    }
+}
+
 // MARK: - Private Structured Scan Stream
 
 private final class ScanProducerHandle: Sendable {
@@ -192,19 +264,21 @@ private final class ScanProducerHandle: Sendable {
 /// waits for that task to finish.
 private struct StructuredScanStream: AsyncSequence, Sendable {
     typealias Element = ScanEvent
+    typealias Failure = CancellationError
 
     let storage: XcodeStorage
 
     struct AsyncIterator: AsyncIteratorProtocol {
-        private var base: AsyncThrowingStream<ScanEvent, any Error>.AsyncIterator
+        private var base: AsyncStream<ScanEvent>.AsyncIterator
         private let producer: ScanProducerHandle
         private var deliveredCompletion = false
 
         init(storage: XcodeStorage) {
-            let (stream, continuation) = AsyncThrowingStream<ScanEvent, any Error>.makeStream()
+            // Not throwing: the producer ends early only when cancelled, which `next()` reports.
+            let (stream, continuation) = AsyncStream<ScanEvent>.makeStream()
             let task = Task.detached(priority: .userInitiated) {
                 if Task.isCancelled {
-                    continuation.finish(throwing: CancellationError())
+                    continuation.finish()
                     return
                 }
 
@@ -255,9 +329,9 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 
                     group.addTask {
                         guard !Task.isCancelled else { return nil }
-                        let items = await storage.scanPreviews(now: referenceDate)
+                        let previews = await storage.scanPreviews(now: referenceDate)
                         guard !Task.isCancelled else { return nil }
-                        return (.previews, items, nil)
+                        return (.previews, previews.items, previews.warning)
                     }
 
                     group.addTask {
@@ -290,12 +364,10 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                     )
                 }
 
-                if Task.isCancelled {
-                    continuation.finish(throwing: CancellationError())
-                } else {
+                if !Task.isCancelled {
                     continuation.yield(.completed(snapshot))
-                    continuation.finish()
                 }
+                continuation.finish()
             }
 
             let producer = ScanProducerHandle(task: task)
@@ -307,7 +379,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
             self.producer = producer
         }
 
-        mutating func next() async throws -> ScanEvent? {
+        mutating func next() async throws(CancellationError) -> ScanEvent? {
             if deliveredCompletion {
                 await producer.waitForExit()
                 return nil
@@ -320,31 +392,26 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
             }
 
             let producer = self.producer
-            do {
-                let event = try await withTaskCancellationHandler {
-                    try await base.next()
-                } onCancel: {
-                    producer.cancel()
-                }
+            let event = await withTaskCancellationHandler {
+                await base.next()
+            } onCancel: {
+                producer.cancel()
+            }
 
-                if Task.isCancelled {
-                    producer.cancel()
-                    await producer.waitForExit()
-                    throw CancellationError()
-                }
-
-                if case .completed = event {
-                    deliveredCompletion = true
-                }
-                if event == nil {
-                    await producer.waitForExit()
-                }
-                return event
-            } catch is CancellationError {
+            if Task.isCancelled {
                 producer.cancel()
                 await producer.waitForExit()
                 throw CancellationError()
             }
+            guard let event else {
+                // The stream ends before `.completed` only when the producer was cancelled.
+                await producer.waitForExit()
+                throw CancellationError()
+            }
+            if case .completed = event {
+                deliveredCompletion = true
+            }
+            return event
         }
     }
 
@@ -358,6 +425,7 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 /// The `delete(_:)` sequence: each `next()` call deletes at most one item.
 private struct DeletionStream: AsyncSequence, Sendable {
     typealias Element = DeletionEvent
+    typealias Failure = CancellationError
 
     let storage: XcodeStorage
     let items: [StorageItem]
@@ -369,6 +437,11 @@ private struct DeletionStream: AsyncSequence, Sendable {
             case finish
             case done
         }
+
+        /// Targets and reasons are public: the log is the user's record of what left their own
+        /// developer folders, and redacted entries couldn't serve as one. Nothing logs below notice,
+        /// the lowest level the system keeps on disk by default.
+        private static let logger = LogContext.deletion.logger
 
         private let storage: XcodeStorage
         private let items: [StorageItem]
@@ -392,7 +465,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
             )
         }
 
-        mutating func next() async throws -> DeletionEvent? {
+        mutating func next() async throws(CancellationError) -> DeletionEvent? {
             if Task.isCancelled {
                 phase = .done
                 throw CancellationError()
@@ -419,13 +492,34 @@ private struct DeletionStream: AsyncSequence, Sendable {
 
                 do {
                     try await storage.remove(item)
+                    Self.logger.notice("""
+                    outcome=removed method=\(item.deletionMethod.logName, privacy: .public) \
+                    bytes=\(item.sizeBytes, privacy: .public) target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
                     removed.append(item)
                     reclaimedBytes += item.sizeBytes
                     return .deleted(itemID: item.id, progress: progress(completing: index))
+                } catch is RemovalInterrupted {
+                    // A stopped trash move or simctl command may still have taken effect.
+                    Self.logger.notice("""
+                    outcome=unknown method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
+                    phase = .done
+                    throw CancellationError()
                 } catch is CancellationError {
+                    Self.logger.notice("""
+                    outcome=skipped method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
                     phase = .done
                     throw CancellationError()
                 } catch {
+                    Self.logger.error("""
+                    outcome=failed method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public) \
+                    reason=\(error.localizedDescription, privacy: .public)
+                    """)
                     let failure = DeletionFailure(
                         itemID: item.id,
                         itemName: item.name,

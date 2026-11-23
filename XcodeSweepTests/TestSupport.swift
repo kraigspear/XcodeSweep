@@ -20,6 +20,11 @@ struct TempXcodeFixture {
         let workspacesRoot = root.appendingPathComponent("Workspaces", isDirectory: true)
         try FileManager.default.createDirectory(at: xcodeRoot, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: workspacesRoot, withIntermediateDirectories: true)
+        // As on a Mac that has run SwiftUI previews, so scans list the preview set.
+        try FileManager.default.createDirectory(
+            at: xcodeRoot.appendingPathComponent("UserData/Previews/Simulator Devices", isDirectory: true),
+            withIntermediateDirectories: true
+        )
 
         rootURL = root
         xcodeRootURL = xcodeRoot
@@ -171,12 +176,14 @@ struct TempXcodeFixture {
 struct StubCommandRunner: CommandRunning, Sendable {
     var devicesJSON = #"{"devices":{}}"#
     var runtimesJSON = #"{}"#
+    var previewDevicesJSON = #"{"devices":{}}"#
     var devicesError: (any Error)?
     var runtimesError: (any Error)?
+    var previewDevicesError: (any Error)?
     var shutdownError: (any Error)?
 
     func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
-        if arguments.starts(with: ["simctl", "shutdown"]), let shutdownError {
+        if arguments.contains("shutdown"), let shutdownError {
             throw shutdownError
         }
         switch arguments {
@@ -185,6 +192,11 @@ struct StubCommandRunner: CommandRunning, Sendable {
                 throw devicesError
             }
             return CommandOutput(stdout: Data(devicesJSON.utf8), stderr: Data(), terminationStatus: 0)
+        case ["simctl", "--set", "previews", "list", "devices", "-j"]:
+            if let previewDevicesError {
+                throw previewDevicesError
+            }
+            return CommandOutput(stdout: Data(previewDevicesJSON.utf8), stderr: Data(), terminationStatus: 0)
         case ["simctl", "runtime", "list", "-j"]:
             if let runtimesError {
                 throw runtimesError
@@ -197,6 +209,10 @@ struct StubCommandRunner: CommandRunning, Sendable {
 }
 
 typealias ControllableCommandRunner = ParkedCalls<[String], CommandOutput>
+
+/// The `simctl` list commands a scan of `TempXcodeFixture` runs: devices, runtimes, and preview
+/// devices. Without a preview set folder, a scan skips the third.
+let scanSimctlListCallCount = 3
 
 actor RecordingCommandRunner: CommandRunning {
     struct Call: Equatable, Sendable {
@@ -602,7 +618,7 @@ actor SlowExitCommandRunner: CommandRunning {
     private let exited = AsyncSignal()
 
     func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
-        if arguments.starts(with: ["simctl", "shutdown"]) {
+        if arguments.contains("shutdown") {
             return CommandOutput(stdout: Data(), stderr: Data(), terminationStatus: 0)
         }
         parkedArguments.append(arguments)

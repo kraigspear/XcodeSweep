@@ -38,7 +38,7 @@ struct StorageCategoryTests {
         (.simulatorDevices, [.all, .reclaimable, .unavailable, .stale]),
         (.simulatorRuntimes, [.all, .reclaimable, .stale]),
         (.deviceSupport, [.all, .reclaimable, .stale]),
-        (.previews, [.all, .reclaimable, .stale]),
+        (.previews, [.all, .reclaimable, .unavailable, .stale]),
         (.archivesAndCaches, [.all, .reclaimable, .stale]),
     ])
     func availableFilters_matchPossibleStatuses(category: StorageCategory, expected: [ItemFilter]) {

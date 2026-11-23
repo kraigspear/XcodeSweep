@@ -4,8 +4,8 @@ import Foundation
 enum DeletionMethod: Equatable, Hashable, Sendable {
     /// Moves the filesystem path to the user's Trash (reversible).
     case trashFile(URL)
-    /// Deletes a simulator device via `xcrun simctl delete <udid>` (permanent).
-    case simctlDevice(udid: String)
+    /// Deletes a simulator device via `xcrun simctl [--set previews] delete <udid>` (permanent).
+    case simctlDevice(udid: String, deviceSet: SimulatorDeviceSet = .standard)
     /// Deletes a simulator runtime disk image via `xcrun simctl runtime delete <identifier>` (permanent).
     case simctlRuntime(identifier: String)
     /// Cannot be deleted (for example, a system-managed non-deletable runtime).
@@ -24,6 +24,22 @@ enum DeletionMethod: Equatable, Hashable, Sendable {
             false
         case .simctlDevice, .simctlRuntime:
             true
+        }
+    }
+}
+
+/// A set of simulator devices that CoreSimulator manages.
+enum SimulatorDeviceSet: Hashable, Sendable {
+    /// The set Simulator.app and `simctl` use by default.
+    case standard
+    /// Xcode's SwiftUI preview devices, in `UserData/Previews/Simulator Devices`.
+    case previews
+
+    /// The arguments that select this set, placed right after `simctl`.
+    var simctlArguments: [String] {
+        switch self {
+        case .standard: []
+        case .previews: ["--set", "previews"]
         }
     }
 }

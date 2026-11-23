@@ -125,7 +125,7 @@ private struct MultiItemInspectorContent: View {
                     LabeledInspectorRow(label: "Move to Trash", value: "\(plan.trashCount) items (reversible)")
                 }
                 if plan.permanentCount > 0 {
-                    LabeledInspectorRow(label: "xcrun simctl delete", value: "\(plan.permanentCount) items (permanent)")
+                    LabeledInspectorRow(label: "Delete with simctl", value: "\(plan.permanentCount) items (permanent)")
                 }
                 if plan.protectedCount > 0 {
                     LabeledInspectorRow(label: "Protected (Skipped)", value: "\(plan.protectedCount) items")

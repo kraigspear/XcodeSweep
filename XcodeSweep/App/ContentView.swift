@@ -87,10 +87,6 @@ struct ContentView: View {
         .sheet(item: $failureListReport) { report in
             FailureListView(failures: report.failures)
         }
-        .alert("Scan Error", item: $bindableStore.errorMessage) { _ in
-        } message: { message in
-            Text(message)
-        }
         .task {
             await store.refreshIfNeeded()
         }

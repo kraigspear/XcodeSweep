@@ -70,7 +70,9 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
             [.unavailable, .booted, .stale, .active]
         case .simulatorRuntimes:
             [.systemManaged, .stale, .active]
-        case .deviceSupport, .previews, .archivesAndCaches:
+        case .previews:
+            [.unavailable, .booted, .stale, .active]
+        case .deviceSupport, .archivesAndCaches:
             [.stale, .active]
         }
     }
@@ -92,7 +94,7 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
     var summaryDescription: String {
         switch self {
         case .derivedData:
-            "Per-project and per-worktree build artifacts in ~/Library/Developer/Xcode/DerivedData."
+            "Per-project and per-worktree build artifacts in Xcode's DerivedData folder."
         case .simulatorDevices:
             "Simulator data containers in ~/Library/Developer/CoreSimulator/Devices."
         case .simulatorRuntimes:

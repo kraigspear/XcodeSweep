@@ -17,12 +17,17 @@ extension XcodeStorage {
     }
 
     func scanSimulatorDevices(now: Date) async throws -> [StorageItem] {
+        try await listSimulatorDevices(in: .standard, now: now)
+    }
+
+    /// The devices registered in `deviceSet`, as items of the category that shows that set.
+    func listSimulatorDevices(in deviceSet: SimulatorDeviceSet, now: Date) async throws -> [StorageItem] {
         let output = try await commandRunner.run(
             executableURL: Self.xcrunURL,
-            arguments: ["simctl", "list", "devices", "-j"],
+            arguments: ["simctl"] + deviceSet.simctlArguments + ["list", "devices", "-j"],
             timeout: Self.simctlListTimeout
         )
-        return try Self.decodeDevices(from: output.stdout, now: now)
+        return try Self.decodeDevices(from: output.stdout, in: deviceSet, now: now)
     }
 
     // MARK: - Deletion
@@ -31,11 +36,12 @@ extension XcodeStorage {
     ///
     /// Tries every device rather than those booted at scan time: one may have booted since. A failed
     /// shutdown doesn't stop the delete, which reports its own error if the device can't go.
-    func deleteSimulatorDevice(udid: String) async throws {
+    func deleteSimulatorDevice(udid: String, in deviceSet: SimulatorDeviceSet) async throws {
+        let simctl = ["simctl"] + deviceSet.simctlArguments
         do {
             _ = try await commandRunner.run(
                 executableURL: Self.xcrunURL,
-                arguments: ["simctl", "shutdown", udid],
+                arguments: simctl + ["shutdown", udid],
                 timeout: nil
             )
         } catch is CancellationError {
@@ -43,20 +49,24 @@ extension XcodeStorage {
         } catch {
             // Fails when the device is already shut down; delete reports any real problem.
         }
-        try Task.checkCancellation()
-        _ = try await commandRunner.run(
-            executableURL: Self.xcrunURL,
-            arguments: ["simctl", "delete", udid],
-            timeout: nil
-        )
+        // `removing` checks cancellation first, so a stop during shutdown skips the delete.
+        try await Self.removing {
+            _ = try await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: simctl + ["delete", udid],
+                timeout: nil
+            )
+        }
     }
 
     func deleteSimulatorRuntime(identifier: String) async throws {
-        _ = try await commandRunner.run(
-            executableURL: Self.xcrunURL,
-            arguments: ["simctl", "runtime", "delete", identifier],
-            timeout: nil
-        )
+        try await Self.removing {
+            _ = try await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: ["simctl", "runtime", "delete", identifier],
+                timeout: nil
+            )
+        }
     }
 
     // MARK: - Shared Formatting
@@ -131,7 +141,12 @@ extension XcodeStorage {
         .sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
-    private static func decodeDevices(from data: Data, now: Date) throws -> [StorageItem] {
+    private static func decodeDevices(
+        from data: Data,
+        in deviceSet: SimulatorDeviceSet,
+        now: Date
+    ) throws -> [StorageItem] {
+        let category: StorageCategory = deviceSet == .previews ? .previews : .simulatorDevices
         let payload = try JSONDecoder().decode(SimDeviceListPayload.self, from: data)
         var items: [StorageItem] = []
 
@@ -151,7 +166,7 @@ extension XcodeStorage {
                 } else if isBooted {
                     status = .booted
                 } else {
-                    status = StorageCategory.simulatorDevices.ageStatus(lastUsed: lastUsedDate, now: now)
+                    status = category.ageStatus(lastUsed: lastUsedDate, now: now)
                 }
 
                 let deviceURL = device.dataPath.map {
@@ -186,8 +201,8 @@ extension XcodeStorage {
 
                 items.append(
                     StorageItem(
-                        id: "simDevice:\(device.udid)",
-                        category: .simulatorDevices,
+                        id: deviceSet == .previews ? "previewDevice:\(device.udid)" : "simDevice:\(device.udid)",
+                        category: category,
                         name: device.name,
                         subtitle: subtitleParts.joined(separator: " • "),
                         sizeBytes: totalSize,
@@ -195,7 +210,7 @@ extension XcodeStorage {
                         path: deviceURL,
                         workspacePath: nil,
                         status: status,
-                        deletionMethod: .simctlDevice(udid: device.udid),
+                        deletionMethod: .simctlDevice(udid: device.udid, deviceSet: deviceSet),
                         metadata: metadata
                     )
                 )

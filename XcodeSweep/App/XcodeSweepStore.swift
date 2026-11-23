@@ -71,7 +71,6 @@ final class XcodeSweepStore {
     var pendingDeletion: DeletionPlan?
     /// The outcome of the last finished deletion; non-nil presents the completion alert.
     var lastDeletionReport: DeletionReport?
-    var errorMessage: String?
 
     private let xcodeStorage: XcodeStorage
     @ObservationIgnored
@@ -134,8 +133,8 @@ final class XcodeSweepStore {
 
     /// Starts rescanning all categories, updating the inventory as each category finishes.
     ///
-    /// If the scan fails or is cancelled, the previous inventory is restored; only a failure sets
-    /// `errorMessage`. Call `cancelOperation()` to stop it.
+    /// A scan can only be cancelled, not fail; a cancelled scan restores the inventory from when
+    /// it began. Call `cancelOperation()` to stop it.
     ///
     /// - Returns: The scan's task, for callers that wait on it; `nil` if busy, and nothing started.
     @discardableResult
@@ -153,7 +152,6 @@ final class XcodeSweepStore {
         pendingDeletion = nil
         operation = .scanning(completed: [])
         scanWarnings = []
-        errorMessage = nil
 
         let task = Task { [weak self] in
             guard let self else { return }
@@ -175,8 +173,8 @@ final class XcodeSweepStore {
             operationTask = nil
         }
 
-        do {
-            try Task.checkCancellation()
+        do throws(CancellationError) {
+            guard !Task.isCancelled else { throw CancellationError() }
             var completed: Set<StorageCategory> = []
             for try await event in xcodeStorage.scan() {
                 switch event {
@@ -192,14 +190,10 @@ final class XcodeSweepStore {
                     return
                 }
             }
-        } catch is CancellationError {
+        } catch {
             // Interrupted, not failed: restore the inventory from when this scan began, and report nothing.
             inventory = previousInventory
             scanWarnings = previousWarnings
-        } catch {
-            inventory = previousInventory
-            scanWarnings = previousWarnings
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -322,8 +316,8 @@ final class XcodeSweepStore {
     private func runDeletion(_ plan: DeletionPlan) async {
         var removed: [StorageItem] = []
         var failures: [DeletionFailure] = []
-        do {
-            try Task.checkCancellation()
+        do throws(CancellationError) {
+            guard !Task.isCancelled else { throw CancellationError() }
             for try await event in xcodeStorage.delete(plan) {
                 switch event {
                 case let .starting(progress):
@@ -345,13 +339,11 @@ final class XcodeSweepStore {
                     return
                 }
             }
-        } catch is CancellationError {
+        } catch {
             // Interrupted, not failed: report what happened before the stop, if anything did.
             if !removed.isEmpty || !failures.isEmpty {
                 lastDeletionReport = DeletionReport(removed: removed, failures: failures, wasCancelled: true)
             }
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 

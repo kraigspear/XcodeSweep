@@ -5,6 +5,36 @@ import Testing
 
 @Suite("XcodeStorage cancellation")
 struct XcodeStorageCancellationTests {
+    /// A scan that stops before `.completed` must not look finished, or the store would keep a
+    /// partial inventory instead of restoring the previous one.
+    @Test("A producer cancelled on its own makes the scan throw, though the consumer wasn't cancelled", .timeLimit(.minutes(1)))
+    func producerCancelledAloneThrows() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            // The producer reads the clock first; cancelling the task that calls it cancels only the producer.
+            now: {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return testISO8601Date("2026-11-21T10:00:00Z")
+            }
+        )
+
+        let consumer = Task {
+            var events: [ScanEvent] = []
+            for try await event in storage.scan() {
+                events.append(event)
+            }
+            return events
+        }
+
+        let result = try await awaitResult(of: consumer, within: .seconds(10))
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(!consumer.isCancelled)
+    }
+
     @Test(
         "Cancelling during booted simctl shutdown stops immediately without deleting or starting remaining items",
         .timeLimit(.minutes(1))
@@ -80,6 +110,8 @@ struct XcodeStorageCancellationTests {
     )
     func cancelledShutdownReturningNormallyStillSkipsDelete() async throws {
         let runner = IgnoreCancelShutdownRunner()
+        // Unique, so this test's log entries can't be confused with another's.
+        let udid = "UDID-BOOTED-\(UUID().uuidString)"
         let storage = XcodeStorage(
             commandRunner: runner,
             fileTrasher: RecordingFileTrasher()
@@ -95,7 +127,7 @@ struct XcodeStorageCancellationTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
-            deletionMethod: .simctlDevice(udid: "UDID-BOOTED"),
+            deletionMethod: .simctlDevice(udid: udid),
             metadata: []
         )
 
@@ -112,7 +144,10 @@ struct XcodeStorageCancellationTests {
             try await deleteTask.value
         }
 
-        #expect(await runner.recordedArguments == [["simctl", "shutdown", "UDID-BOOTED"]])
+        #expect(await runner.recordedArguments == [["simctl", "shutdown", udid]])
+        // Nothing reached simctl delete, so the log mustn't suggest the device may be gone.
+        let entries = try deletionLogEntries(mentioning: udid)
+        #expect(entries.map(\.composedMessage) == ["outcome=skipped method=simctlDevice target=\(udid)"])
     }
 
     @Test(
@@ -174,7 +209,7 @@ struct XcodeStorageCancellationTests {
         defer { fixture.cleanup() }
 
         let timeline = OSAllocatedUnfairLock<[String]>(initialState: [])
-        let runner = GatedCleanupCommandRunner(expectedCalls: 2, timeline: timeline)
+        let runner = GatedCleanupCommandRunner(expectedCalls: scanSimctlListCallCount, timeline: timeline)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
@@ -204,7 +239,7 @@ struct XcodeStorageCancellationTests {
             try await scanTask.value
         }
 
-        #expect(timeline.withLock { $0 } == ["cleanupFinished", "cleanupFinished", "consumerExited"])
+        #expect(timeline.withLock { $0 } == Array(repeating: "cleanupFinished", count: scanSimctlListCallCount) + ["consumerExited"])
 
         let events = reportedEvents.withLock { $0 }
         for event in events {
@@ -274,14 +309,15 @@ struct XcodeStorageCancellationTests {
         var parkedCalls: [ParkedCall<[String]>] = []
         for try await event in storage.scan() {
             if case .categoryScanned = event {
-                // Wait until both simctl calls are parked before breaking out of the loop.
-                try parkedCalls.append(await controller.nextPendingCall())
-                try parkedCalls.append(await controller.nextPendingCall())
+                // Wait until every simctl call is parked before breaking out of the loop.
+                for _ in 0 ..< scanSimctlListCallCount {
+                    try parkedCalls.append(await controller.nextPendingCall())
+                }
                 break
             }
         }
 
-        #expect(parkedCalls.count == 2)
+        #expect(parkedCalls.count == scanSimctlListCallCount)
         // Breaking releases the iterator, whose producer handle cancels parked simctl calls.
         for call in parkedCalls {
             do {
