@@ -69,6 +69,7 @@
       "kind": "group",
       "path": "XcodeSweepTests",
       "children": [
+        { "path": "AppSceneTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DeletionPlanTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "DirectorySizerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "ParkedCallsTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },

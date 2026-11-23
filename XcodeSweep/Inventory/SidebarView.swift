@@ -80,7 +80,7 @@ private struct SidebarCategoryRow: View {
     }
 }
 
-private struct DiskFooterView: View {
+struct DiskFooterView: View {
     let volume: DiskVolume?
 
     var body: some View {

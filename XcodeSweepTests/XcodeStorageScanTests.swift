@@ -301,7 +301,7 @@ struct XcodeStorageScanTests {
         #expect(snapshot.warnings.first?.contains("timed out") == true)
     }
 
-    @Test("Passes simctlListTimeout to both simctl list commands during scan")
+    @Test("Gives both simctl list commands a 60-second timeout during scan")
     func scanPassesTimeoutToSimctlListCommands() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
@@ -318,8 +318,9 @@ struct XcodeStorageScanTests {
         let calls = await runner.calls
         let devicesCall = try #require(calls.first { $0.arguments == ["simctl", "list", "devices", "-j"] })
         let runtimesCall = try #require(calls.first { $0.arguments == ["simctl", "runtime", "list", "-j"] })
-        #expect(devicesCall.timeout == XcodeStorage.simctlListTimeout)
-        #expect(runtimesCall.timeout == XcodeStorage.simctlListTimeout)
+        // A literal, so raising the constant fails here; ADR 0001's reasoning assumes a short limit.
+        #expect(devicesCall.timeout == .seconds(60))
+        #expect(runtimesCall.timeout == .seconds(60))
     }
 
     @Test("Classifies DerivedData as orphaned only when its workspace is provably gone")
@@ -393,6 +394,14 @@ struct XcodeStorageScanTests {
         #expect(byName["Linked"]?.status == .active)
         #expect(byName["DataVolumes"]?.status == .active)
         #expect(byName["Replaced"]?.status == .orphaned)
+
+        // The inspector distinguishes unreachable from present and from gone.
+        let workspaceExists = { (name: String) in
+            byName[name]?.metadata.first { $0.key == "Workspace Exists" }?.value
+        }
+        #expect(workspaceExists("Locked") == "Unknown (Not Accessible)")
+        #expect(workspaceExists("Unmounted") == "Unknown (Not Accessible)")
+        #expect(workspaceExists("Gone") == "No (Deleted or Moved)")
         #expect(byName["Locked"]?.isReclaimable == false)
         #expect(byName["Unmounted"]?.isReclaimable == false)
     }
