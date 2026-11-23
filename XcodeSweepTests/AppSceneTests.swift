@@ -52,6 +52,35 @@ struct AppSceneTests {
         #expect(!clean.contains { $0.contains("Scan incomplete") }, "Recognized: \(clean)")
     }
 
+    @Test("The Overview banner and card name a failed category")
+    func overviewShowsFailedCategory() throws {
+        let metrics = CategoryMetrics(category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0)
+
+        let banner = try recognizedText(in: ScanFailuresBanner(failures: [.deviceSupport: "Permission denied"])
+            .frame(width: 600))
+        let card = try recognizedText(in: CategoryCardView(
+            metrics: metrics, isScanning: false, failure: "Permission denied", onOpen: {}, onSelectReclaimable: {}
+        ).frame(width: 360))
+
+        #expect(banner.contains { $0.contains("Device Support: Permission denied") }, "Recognized: \(banner)")
+        #expect(card.contains { $0.contains("Scan incomplete") }, "Recognized: \(card)")
+    }
+
+    /// A filter that hides every row must not hide why some rows may be missing.
+    @Test("A filtered category view still explains a failed scan")
+    func filteredCategoryShowsFailureBanner() throws {
+        let store = XcodeSweepStore.preview(
+            destination: .category(.deviceSupport),
+            scanFailures: [.deviceSupport: "Permission denied"]
+        )
+        store.searchText = "no such item"
+
+        let lines = try recognizedText(in: CategoryDetailView(category: .deviceSupport, store: store)
+            .frame(width: 700, height: 400))
+
+        #expect(lines.contains { $0.contains("fully scan Device Support") }, "Recognized: \(lines)")
+    }
+
     /// The alert lists only the first four failures; this list is where the rest are seen.
     /// To replicate: clean up six items where five or more fail → Show All Failures → scroll the list.
     @Test("The failure list shows every failure with its reason")

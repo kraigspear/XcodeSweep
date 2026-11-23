@@ -210,7 +210,7 @@ private struct CategoryGridSection: View {
     }
 }
 
-private struct CategoryCardView: View {
+struct CategoryCardView: View {
     let metrics: CategoryMetrics
     let isScanning: Bool
     let failure: String?
@@ -271,7 +271,7 @@ private struct CategoryCardView: View {
     }
 }
 
-private struct ScanFailuresBanner: View {
+struct ScanFailuresBanner: View {
     let failures: [StorageCategory: String]
 
     var body: some View {

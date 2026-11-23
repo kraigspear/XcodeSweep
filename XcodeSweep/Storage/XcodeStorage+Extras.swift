@@ -18,7 +18,7 @@ extension XcodeStorage {
         for (folderName, platformLabel) in folderNames {
             let root = xcodeRootURL.appendingPathComponent(folderName, isDirectory: true)
             do {
-                for entry in try Self.folderEntries(of: root) {
+                for entry in try Self.folderEntries(of: root) ?? [] {
                     candidates.append((entry, platformLabel))
                 }
             } catch {
@@ -63,11 +63,13 @@ extension XcodeStorage {
         let previewsDevicesURL = xcodeRootURL
             .appendingPathComponent("UserData/Previews/Simulator Devices", isDirectory: true)
 
-        guard FileManager.default.fileExists(atPath: previewsDevicesURL.path) else { return ([], nil) }
         var failures: [String] = []
         let entries: [URL]
         do {
-            entries = try Self.folderEntries(of: previewsDevicesURL)
+            // Listed rather than checked for existence, so a set behind a folder that can't be read
+            // is a failure, not a missing set.
+            guard let listed = try Self.folderEntries(of: previewsDevicesURL) else { return ([], nil) }
+            entries = listed
         } catch {
             entries = []
             failures.append(error.localizedDescription)
@@ -166,11 +168,11 @@ extension XcodeStorage {
         let archivesURL = xcodeLocations.archivesURL
         var archiveURLs: [URL] = []
         do {
-            for dateFolder in try Self.folderEntries(of: archivesURL)
-                where (try? dateFolder.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-            {
+            // Date folders may be symbolic links; follow them, and skip stray files.
+            for dateFolder in try Self.folderEntries(of: archivesURL) ?? [] where Self.isFolder(dateFolder) {
                 do {
-                    for archive in try Self.folderEntries(of: dateFolder) where archive.pathExtension == "xcarchive" {
+                    let listedFolder = dateFolder.resolvingSymlinksInPath()
+                    for archive in try Self.folderEntries(of: listedFolder) ?? [] where archive.pathExtension == "xcarchive" {
                         archiveURLs.append(archive)
                     }
                 } catch {

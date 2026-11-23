@@ -372,10 +372,12 @@ final class XcodeSweepStore {
         static func preview(
             inventory: StorageInventory = .preview,
             destination: SidebarSelection = .overview,
-            selectedItemIDs: Set<StorageItem.ID> = []
+            selectedItemIDs: Set<StorageItem.ID> = [],
+            scanFailures: [StorageCategory: String] = [:]
         ) -> XcodeSweepStore {
             let store = XcodeSweepStore(xcodeStorage: .preview)
             store.inventory = inventory
+            store.scanFailures = scanFailures
             store.navigate(to: destination)
             store.selectedItemIDs = selectedItemIDs
             return store

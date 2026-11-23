@@ -24,7 +24,7 @@ extension XcodeStorage {
         let fileManager = FileManager.default
         let entries: [URL]
         do {
-            entries = try Self.folderEntries(of: derivedDataURL)
+            entries = try Self.folderEntries(of: derivedDataURL) ?? []
         } catch {
             return ([], [], error.localizedDescription)
         }

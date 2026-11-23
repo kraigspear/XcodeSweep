@@ -168,10 +168,11 @@ struct XcodeStorage: Sendable {
         }
     }
 
-    /// The entries of the folder at `url`, or none if it doesn't exist: a feature never used has no folder.
+    /// The entries of the folder at `url`, or `nil` if it doesn't exist: a feature never used has no folder.
     ///
-    /// - Throws: The error when the folder exists but can't be read, such as when access is denied.
-    static func folderEntries(of url: URL) throws -> [URL] {
+    /// - Throws: The error when the folder, or one above it, exists but can't be read, such as
+    ///   when access is denied.
+    static func folderEntries(of url: URL) throws -> [URL]? {
         do {
             return try FileManager.default.contentsOfDirectory(
                 at: url,
@@ -179,8 +180,13 @@ struct XcodeStorage: Sendable {
                 options: [.skipsHiddenFiles]
             )
         } catch CocoaError.fileReadNoSuchFile {
-            return []
+            return nil
         }
+    }
+
+    /// Whether `url` is a folder, following a symbolic link to one.
+    static func isFolder(_ url: URL) -> Bool {
+        (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
     }
 
     /// The dictionary in the property list at `url`; `nil` if unreadable or not a dictionary.

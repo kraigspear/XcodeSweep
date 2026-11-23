@@ -258,7 +258,7 @@ struct XcodeStorageScanTests {
     }
 
     @Test("Records a failure for each simctl category instead of failing the scan")
-    func scanCapturesSimctlWarnings() async throws {
+    func simctlFailuresAreCategoryFailures() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
 
@@ -281,7 +281,7 @@ struct XcodeStorageScanTests {
     }
 
     @Test("Records a failure instead of failing the scan when simctl times out")
-    func scanCapturesSimctlTimeoutWarning() async throws {
+    func simctlTimeoutIsCategoryFailure() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
 
@@ -553,8 +553,8 @@ struct XcodeStorageScanTests {
     }
 
     /// `simctl --set previews` fails when Xcode has never created the set.
-    /// To replicate: on a Mac that has never run a SwiftUI preview, scan → no SwiftUI Previews warning.
-    @Test("Skips the preview set, without a warning, when its folder doesn't exist")
+    /// To replicate: on a Mac that has never run a SwiftUI preview, scan → no SwiftUI Previews failure.
+    @Test("Skips the preview set, without a failure, when its folder doesn't exist")
     func missingPreviewSetIsQuiet() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
@@ -685,6 +685,58 @@ struct XcodeStorageScanTests {
 
         let snapshot = try await finalScanSnapshot(from: storage)
 
+        #expect(snapshot.failures.isEmpty)
+    }
+
+    /// A preview set that exists behind a folder the user can't search must not look missing.
+    @Test("A preview set behind a folder that can't be read is a failure, not a missing set")
+    func previewSetBehindUnreadableFolderIsFailure() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let previews = fixture.xcodeRootURL.appendingPathComponent("UserData/Previews", isDirectory: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: previews.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: previews.path) }
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.failures[.previews] != nil)
+    }
+
+    /// To replicate: replace an Archives date folder with a symbolic link to it → scan → its archives still appear.
+    @Test("Archives in a date folder reached through a symbolic link are listed")
+    func linkedArchiveDateFolderIsScanned() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let elsewhere = try TempXcodeFixture()
+        defer { elsewhere.cleanup() }
+        let archive = try elsewhere.addArchive(
+            dateFolder: "2026-08-01", archiveName: "Linked 8-1-26", appName: "LinkedApp",
+            shortVersion: "1.0", buildVersion: "1", bundleID: "com.example.linked", creationDate: now
+        )
+        let archives = fixture.xcodeRootURL.appendingPathComponent("Archives", isDirectory: true)
+        try FileManager.default.createDirectory(at: archives, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: archives.appendingPathComponent("2026-08-01"),
+            withDestinationURL: archive.deletingLastPathComponent()
+        )
+        // A stray file beside the date folders is skipped, not reported.
+        try Data().write(to: archives.appendingPathComponent(".DS_Store-like"))
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.itemsByCategory[.archivesAndCaches]?.map(\.name) == ["LinkedApp"])
         #expect(snapshot.failures.isEmpty)
     }
 }
