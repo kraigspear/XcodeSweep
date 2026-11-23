@@ -28,7 +28,7 @@ extension XcodeStorage {
             }
         }
 
-        return await Self.scanConcurrently(candidates) { candidate in
+        return await Self.scanConcurrently(candidates, limiter: folderWalkLimiter) { candidate in
             let size = try DirectorySizer.allocatedSize(of: candidate.url)
             let modified = Self.modificationDate(of: candidate.url)
             let status = StorageCategory.deviceSupport.ageStatus(lastUsed: modified, now: now)
@@ -71,7 +71,7 @@ extension XcodeStorage {
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
-        return await Self.scanConcurrently(directories) { url in
+        return await Self.scanConcurrently(directories, limiter: folderWalkLimiter) { url in
             let size = try DirectorySizer.allocatedSize(of: url)
             let modified = Self.modificationDate(of: url)
             let plist = Self.loadPlist(at: url.appendingPathComponent("device.plist"))
@@ -112,8 +112,11 @@ extension XcodeStorage {
         let fileManager = FileManager.default
 
         // 1. Caches Xcode shares across projects in DerivedData
+        let lane = folderWalkLimiter.makeLane()
         for cacheURL in sharedCaches {
-            try items.append(Self.inspectSharedCache(at: cacheURL))
+            try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
+                try Self.inspectSharedCache(at: cacheURL)
+            })
         }
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
@@ -137,7 +140,7 @@ extension XcodeStorage {
                 }
             }
 
-            let archiveItems = await Self.scanConcurrently(archiveURLs) { archiveURL in
+            let archiveItems = await Self.scanConcurrently(archiveURLs, limiter: folderWalkLimiter) { archiveURL in
                 try Self.inspectArchive(at: archiveURL)
             }
             items.append(contentsOf: archiveItems)
