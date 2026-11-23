@@ -4,6 +4,17 @@ extension XcodeStorage {
     static let moduleCacheFolderName = "ModuleCache.noindex"
 
     func scanDerivedData(now: Date) async -> [StorageItem] {
+        await Self.scanConcurrently(derivedDataFolders().projects) { folderURL in
+            try Self.inspectDerivedDataFolder(at: folderURL, now: now)
+        }
+    }
+
+    /// DerivedData's folders, split into per-project build folders and caches Xcode shares across
+    /// projects, such as `ModuleCache.noindex` and `SDKExplicitPrecompiledModules`.
+    ///
+    /// A project folder has an `info.plist`, or is named `<Project>-<28 lowercase letters>` and has
+    /// lost it. Anything else is a shared cache: Xcode adds new ones without notice, so they aren't listed by name.
+    func derivedDataFolders() -> (projects: [URL], sharedCaches: [URL]) {
         let derivedDataURL = xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true)
         let fileManager = FileManager.default
         guard let entries = try? fileManager.contentsOfDirectory(
@@ -11,17 +22,17 @@ extension XcodeStorage {
             includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         ) else {
-            return []
+            return ([], [])
         }
 
-        let candidates = entries.filter { url in
-            guard url.lastPathComponent != Self.moduleCacheFolderName else { return false }
-            return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+        let folders = entries.filter { url in
+            (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
-
-        return await Self.scanConcurrently(candidates) { folderURL in
-            try Self.inspectDerivedDataFolder(at: folderURL, now: now)
+        let isProject = { (url: URL) in
+            fileManager.fileExists(atPath: url.appendingPathComponent("info.plist").path)
+                || url.lastPathComponent.wholeMatch(of: /.+-[a-z]{28}/) != nil
         }
+        return (folders.filter(isProject), folders.filter { !isProject($0) })
     }
 
     // MARK: - Private Inspection

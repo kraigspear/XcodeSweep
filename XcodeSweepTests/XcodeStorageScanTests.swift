@@ -423,4 +423,55 @@ struct XcodeStorageScanTests {
 
         #expect(snapshot.volume?.name == expectedName)
     }
+
+    /// To replicate: open DerivedData; Xcode's own caches such as SDKExplicitPrecompiledModules
+    /// appeared as Orphaned because they have no info.plist.
+    @Test("Lists Xcode's shared DerivedData caches under Archives & Caches, not as orphaned projects")
+    func sharedDerivedDataCachesAreNotProjects() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let derivedData = fixture.xcodeRootURL.appendingPathComponent("DerivedData", isDirectory: true)
+
+        // Given: shared caches with no info.plist, a project folder that lost its info.plist,
+        // and a project folder Xcode named without the usual hash
+        for cache in ["SDKExplicitPrecompiledModules", "CompilationCache.noindex", "SymbolCache.noindex"] {
+            let url = derivedData.appendingPathComponent(cache, isDirectory: true)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try Data(repeating: 0xCC, count: 4096).write(to: url.appendingPathComponent("cache.bin"))
+        }
+        try fixture.addModuleCache()
+        let lostPlist = derivedData.appendingPathComponent("LostPlist-abcdefghijklmnopqrstuvwxyzab", isDirectory: true)
+        try FileManager.default.createDirectory(at: lostPlist, withIntermediateDirectories: true)
+        try fixture.addDerivedData(
+            folderName: "Custom-kli453",
+            workspacePath: "/nonexistent/Custom.xcodeproj",
+            lastAccessed: now
+        )
+
+        // When
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        // Then: only project folders are DerivedData items
+        let projects = try #require(snapshot.itemsByCategory[.derivedData])
+        #expect(Set(projects.compactMap { $0.path?.lastPathComponent }) == [lostPlist.lastPathComponent, "Custom-kli453"])
+        #expect(projects.allSatisfy { $0.status == .orphaned })
+
+        // The caches are listed as caches, recommended only where they already were.
+        let caches = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.archivesAndCaches]).map { ($0.name, $0) }
+        )
+        for cache in ["SDKExplicitPrecompiledModules", "CompilationCache.noindex", "SymbolCache.noindex"] {
+            #expect(caches[cache]?.status == .active, "\(cache)")
+            #expect(caches[cache]?.isReclaimable == false, "\(cache)")
+            #expect((caches[cache]?.sizeBytes ?? 0) > 0, "\(cache)")
+        }
+        #expect(caches["ModuleCache.noindex"]?.status == .stale)
+    }
 }

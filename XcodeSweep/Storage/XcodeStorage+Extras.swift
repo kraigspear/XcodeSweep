@@ -111,30 +111,9 @@ extension XcodeStorage {
         var items: [StorageItem] = []
         let fileManager = FileManager.default
 
-        // 1. DerivedData/ModuleCache.noindex
-        let moduleCacheURL = xcodeRootURL
-            .appendingPathComponent("DerivedData/\(Self.moduleCacheFolderName)", isDirectory: true)
-        if fileManager.fileExists(atPath: moduleCacheURL.path) {
-            let size = try DirectorySizer.allocatedSize(of: moduleCacheURL)
-            let modified = Self.modificationDate(of: moduleCacheURL)
-            items.append(
-                StorageItem(
-                    id: "cache:moduleCache",
-                    category: .archivesAndCaches,
-                    name: Self.moduleCacheFolderName,
-                    subtitle: "Shared Swift/Clang module cache (safely regenerated on next build)",
-                    sizeBytes: size,
-                    lastUsedDate: modified,
-                    path: moduleCacheURL,
-                    workspacePath: nil,
-                    status: .stale,
-                    deletionMethod: .trashFile(moduleCacheURL),
-                    metadata: [
-                        MetadataEntry(key: "Type", value: "Xcode Build Cache"),
-                        MetadataEntry(key: "Path", value: moduleCacheURL.path),
-                    ]
-                )
-            )
+        // 1. Caches Xcode shares across projects in DerivedData
+        for cacheURL in derivedDataFolders().sharedCaches {
+            try items.append(Self.inspectSharedCache(at: cacheURL))
         }
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
@@ -167,7 +146,31 @@ extension XcodeStorage {
         return items.sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
-    // MARK: - Private Archive Inspection
+    // MARK: - Private Inspection
+
+    /// The module cache keeps its long-standing Unused status; other shared caches aren't
+    /// recommended, since clearing one slows every project's next build.
+    private static func inspectSharedCache(at url: URL) throws(CancellationError) -> StorageItem {
+        let isModuleCache = url.lastPathComponent == moduleCacheFolderName
+        return try StorageItem(
+            id: isModuleCache ? "cache:moduleCache" : "cache:\(url.lastPathComponent)",
+            category: .archivesAndCaches,
+            name: url.lastPathComponent,
+            subtitle: isModuleCache
+                ? "Shared Swift/Clang module cache (safely regenerated on next build)"
+                : "Shared Xcode build cache (regenerated on next build)",
+            sizeBytes: DirectorySizer.allocatedSize(of: url),
+            lastUsedDate: modificationDate(of: url),
+            path: url,
+            workspacePath: nil,
+            status: isModuleCache ? .stale : .active,
+            deletionMethod: .trashFile(url),
+            metadata: [
+                MetadataEntry(key: "Type", value: "Xcode Build Cache"),
+                MetadataEntry(key: "Path", value: url.path),
+            ]
+        )
+    }
 
     private static func inspectArchive(at url: URL) throws(CancellationError) -> StorageItem {
         let size = try DirectorySizer.allocatedSize(of: url)

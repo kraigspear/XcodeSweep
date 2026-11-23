@@ -102,7 +102,7 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
         case .previews:
             "Xcode SwiftUI Preview simulator devices in UserData/Previews."
         case .archivesAndCaches:
-            "Xcode .xcarchive builds and DerivedData ModuleCache.noindex."
+            "Xcode .xcarchive builds and the build caches Xcode shares in DerivedData."
         }
     }
 }
