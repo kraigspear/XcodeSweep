@@ -70,7 +70,9 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
             [.unavailable, .booted, .stale, .active]
         case .simulatorRuntimes:
             [.systemManaged, .stale, .active]
-        case .deviceSupport, .previews, .archivesAndCaches:
+        case .previews:
+            [.unavailable, .booted, .stale, .active]
+        case .deviceSupport, .archivesAndCaches:
             [.stale, .active]
         }
     }

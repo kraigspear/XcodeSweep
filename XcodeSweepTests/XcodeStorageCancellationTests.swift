@@ -209,7 +209,7 @@ struct XcodeStorageCancellationTests {
         defer { fixture.cleanup() }
 
         let timeline = OSAllocatedUnfairLock<[String]>(initialState: [])
-        let runner = GatedCleanupCommandRunner(expectedCalls: 2, timeline: timeline)
+        let runner = GatedCleanupCommandRunner(expectedCalls: scanSimctlListCallCount, timeline: timeline)
         let storage = XcodeStorage(
             xcodeRootURL: fixture.xcodeRootURL,
             commandRunner: runner,
@@ -239,7 +239,7 @@ struct XcodeStorageCancellationTests {
             try await scanTask.value
         }
 
-        #expect(timeline.withLock { $0 } == ["cleanupFinished", "cleanupFinished", "consumerExited"])
+        #expect(timeline.withLock { $0 } == Array(repeating: "cleanupFinished", count: scanSimctlListCallCount) + ["consumerExited"])
 
         let events = reportedEvents.withLock { $0 }
         for event in events {
@@ -309,14 +309,15 @@ struct XcodeStorageCancellationTests {
         var parkedCalls: [ParkedCall<[String]>] = []
         for try await event in storage.scan() {
             if case .categoryScanned = event {
-                // Wait until both simctl calls are parked before breaking out of the loop.
-                try parkedCalls.append(await controller.nextPendingCall())
-                try parkedCalls.append(await controller.nextPendingCall())
+                // Wait until every simctl call is parked before breaking out of the loop.
+                for _ in 0 ..< scanSimctlListCallCount {
+                    try parkedCalls.append(await controller.nextPendingCall())
+                }
                 break
             }
         }
 
-        #expect(parkedCalls.count == 2)
+        #expect(parkedCalls.count == scanSimctlListCallCount)
         // Breaking releases the iterator, whose producer handle cancels parked simctl calls.
         for call in parkedCalls {
             do {

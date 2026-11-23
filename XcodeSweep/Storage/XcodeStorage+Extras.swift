@@ -54,24 +54,44 @@ extension XcodeStorage {
 
     // MARK: - SwiftUI Previews
 
-    func scanPreviews(now: Date) async -> [StorageItem] {
+    /// Preview devices `simctl` has registered, for deletion through it, and leftover folders it
+    /// doesn't know, for Trash.
+    ///
+    /// When `simctl` can't list the set, every folder is protected: any of them may be registered,
+    /// and trashing one behind CoreSimulator's back leaves its set pointing at a missing device.
+    /// Without the set's folder there is nothing to list, and `simctl` would fail on the missing path.
+    func scanPreviews(now: Date) async -> (items: [StorageItem], warning: String?) {
         let previewsDevicesURL = xcodeRootURL
             .appendingPathComponent("UserData/Previews/Simulator Devices", isDirectory: true)
 
         let fileManager = FileManager.default
-        guard let entries = try? fileManager.contentsOfDirectory(
+        guard fileManager.fileExists(atPath: previewsDevicesURL.path) else { return ([], nil) }
+        let entries = (try? fileManager.contentsOfDirectory(
             at: previewsDevicesURL,
             includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
-        ) else {
-            return []
-        }
-
+        )) ?? []
         let directories = entries.filter {
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
-        return await Self.scanConcurrently(directories, limiter: folderWalkLimiter) { url in
+        let registered: [StorageItem]?
+        let warning: String?
+        do {
+            registered = try await listSimulatorDevices(in: .previews, now: now)
+            warning = nil
+        } catch {
+            registered = nil
+            warning = error is CancellationError ? nil : "SwiftUI Previews: \(error.localizedDescription)"
+        }
+
+        let registeredUDIDs = Set((registered ?? []).compactMap { item -> String? in
+            if case let .simctlDevice(udid, _) = item.deletionMethod { udid } else { nil }
+        })
+        let leftovers = directories.filter { !registeredUDIDs.contains($0.lastPathComponent) }
+        let canTrashLeftovers = registered != nil
+
+        let leftoverItems = await Self.scanConcurrently(leftovers, limiter: folderWalkLimiter) { url in
             let size = try DirectorySizer.allocatedSize(of: url)
             let modified = Self.modificationDate(of: url)
             let plist = Self.loadPlist(at: url.appendingPathComponent("device.plist"))
@@ -99,10 +119,15 @@ extension XcodeStorage {
                 path: url,
                 workspacePath: nil,
                 status: status,
-                deletionMethod: .trashFile(url),
+                deletionMethod: canTrashLeftovers
+                    ? .trashFile(url)
+                    : .notDeletable(reason: "simctl couldn't confirm this folder isn't a registered preview device"),
                 metadata: metadata
             )
         }
+
+        let items = ((registered ?? []) + leftoverItems).sorted { $0.sizeBytes > $1.sizeBytes }
+        return (items, warning)
     }
 
     // MARK: - Archives & Caches
