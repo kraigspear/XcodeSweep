@@ -8,6 +8,7 @@ struct CategoryDetailView: View {
     var body: some View {
         @Bindable var bindableStore = store
         let visibleItems = store.visibleItems(for: category)
+        let hasActiveFilter = store.statusFilter != .all || !store.searchText.isEmpty
 
         VStack(spacing: 0) {
             CategoryFilterBar(
@@ -20,11 +21,18 @@ struct CategoryDetailView: View {
 
             Divider()
 
+            // An empty, unfiltered category explains the failure in its empty state instead.
+            if let failure = store.scanFailures[category], !visibleItems.isEmpty || hasActiveFilter {
+                CategoryScanFailureBanner(category: category, failure: failure)
+                Divider()
+            }
+
             if visibleItems.isEmpty {
                 CategoryEmptyStateView(
                     category: category,
                     isScanning: store.operation.isScanning(category),
-                    hasActiveFilter: store.statusFilter != .all || !store.searchText.isEmpty,
+                    failure: store.scanFailures[category],
+                    hasActiveFilter: hasActiveFilter,
                     onResetFilters: {
                         store.statusFilter = .all
                         store.searchText = ""
@@ -144,9 +152,11 @@ private struct CategoryFilterBar: View {
     }
 }
 
-private struct CategoryEmptyStateView: View {
+struct CategoryEmptyStateView: View {
     let category: StorageCategory
     let isScanning: Bool
+    /// Why the scan is incomplete; an empty category then can't claim nothing is there.
+    let failure: String?
     let hasActiveFilter: Bool
     let onResetFilters: () -> Void
 
@@ -158,6 +168,12 @@ private struct CategoryEmptyStateView: View {
                     Text("Scanning \(category.title)…")
                         .foregroundStyle(.secondary)
                 }
+            } else if let failure, !hasActiveFilter {
+                ContentUnavailableView(
+                    "Couldn't Scan \(category.title)",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(failure)
+                )
             } else if hasActiveFilter {
                 ContentUnavailableView {
                     Label("No Matching Items", systemImage: "line.3.horizontal.decrease.circle")

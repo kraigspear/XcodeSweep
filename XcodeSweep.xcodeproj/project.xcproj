@@ -44,6 +44,7 @@
             { "path": "ItemFilter.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "OverviewView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "SidebarView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "ScanFailureViews.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StatusBadgeView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StorageCategory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "StorageInventory.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },

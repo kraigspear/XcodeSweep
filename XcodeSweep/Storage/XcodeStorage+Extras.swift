@@ -3,7 +3,8 @@ import Foundation
 extension XcodeStorage {
     // MARK: - Device Support
 
-    func scanDeviceSupport(now: Date) async -> [StorageItem] {
+    /// `failure` names each DeviceSupport folder that couldn't be read.
+    func scanDeviceSupport(now: Date) async -> (items: [StorageItem], failure: String?) {
         let folderNames = [
             ("iOS DeviceSupport", "iOS"),
             ("watchOS DeviceSupport", "watchOS"),
@@ -11,24 +12,21 @@ extension XcodeStorage {
             ("visionOS DeviceSupport", "visionOS"),
         ]
 
-        let fileManager = FileManager.default
         var candidates: [(url: URL, platformLabel: String)] = []
+        var failures: [String] = []
 
         for (folderName, platformLabel) in folderNames {
             let root = xcodeRootURL.appendingPathComponent(folderName, isDirectory: true)
-            guard let entries = try? fileManager.contentsOfDirectory(
-                at: root,
-                includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-                options: [.skipsHiddenFiles]
-            ) else {
-                continue
-            }
-            for entry in entries {
-                candidates.append((entry, platformLabel))
+            do {
+                for entry in try Self.folderEntries(of: root) ?? [] {
+                    candidates.append((entry, platformLabel))
+                }
+            } catch {
+                failures.append(error.localizedDescription)
             }
         }
 
-        return await Self.scanConcurrently(candidates, limiter: folderWalkLimiter) { candidate in
+        let items = await Self.scanConcurrently(candidates, limiter: folderWalkLimiter) { candidate in
             let size = try DirectorySizer.allocatedSize(of: candidate.url)
             let modified = Self.modificationDate(of: candidate.url)
             let status = StorageCategory.deviceSupport.ageStatus(lastUsed: modified, now: now)
@@ -50,6 +48,7 @@ extension XcodeStorage {
                 ]
             )
         }
+        return (items, failures.isEmpty ? nil : failures.joined(separator: "\n"))
     }
 
     // MARK: - SwiftUI Previews
@@ -60,29 +59,33 @@ extension XcodeStorage {
     /// When `simctl` can't list the set, every folder is protected: any of them may be registered,
     /// and trashing one behind CoreSimulator's back leaves its set pointing at a missing device.
     /// Without the set's folder there is nothing to list, and `simctl` would fail on the missing path.
-    func scanPreviews(now: Date) async -> (items: [StorageItem], warning: String?) {
+    func scanPreviews(now: Date) async -> (items: [StorageItem], failure: String?) {
         let previewsDevicesURL = xcodeRootURL
             .appendingPathComponent("UserData/Previews/Simulator Devices", isDirectory: true)
 
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: previewsDevicesURL.path) else { return ([], nil) }
-        let entries = (try? fileManager.contentsOfDirectory(
-            at: previewsDevicesURL,
-            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        )) ?? []
+        var failures: [String] = []
+        let entries: [URL]
+        do {
+            // Listed rather than checked for existence, so a set behind a folder that can't be read
+            // is a failure, not a missing set.
+            guard let listed = try Self.folderEntries(of: previewsDevicesURL) else { return ([], nil) }
+            entries = listed
+        } catch {
+            entries = []
+            failures.append(error.localizedDescription)
+        }
         let directories = entries.filter {
             (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
         }
 
         let registered: [StorageItem]?
-        let warning: String?
         do {
             registered = try await listSimulatorDevices(in: .previews, now: now)
-            warning = nil
         } catch {
             registered = nil
-            warning = error is CancellationError ? nil : "SwiftUI Previews: \(error.localizedDescription)"
+            if !(error is CancellationError) {
+                failures.append(error.localizedDescription)
+            }
         }
 
         // Matched by file identity: a folder may spell its UDID in another case than simctl, and on a
@@ -140,14 +143,17 @@ extension XcodeStorage {
         }
 
         let items = ((registered ?? []) + leftoverItems).sorted { $0.sizeBytes > $1.sizeBytes }
-        return (items, warning)
+        return (items, failures.isEmpty ? nil : failures.joined(separator: "\n"))
     }
 
     // MARK: - Archives & Caches
 
-    func scanArchivesAndCaches(sharedCaches: [URL]) async throws(CancellationError) -> [StorageItem] {
+    /// `failure` names each archives folder that couldn't be read.
+    func scanArchivesAndCaches(
+        sharedCaches: [URL]
+    ) async throws(CancellationError) -> (items: [StorageItem], failure: String?) {
         var items: [StorageItem] = []
-        let fileManager = FileManager.default
+        var failures: [String] = []
 
         // 1. Caches Xcode shares across projects in DerivedData
         let lane = folderWalkLimiter.makeLane()
@@ -160,32 +166,42 @@ extension XcodeStorage {
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
         let archivesURL = xcodeLocations.archivesURL
-        if let dateFolders = try? fileManager.contentsOfDirectory(
-            at: archivesURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ) {
-            var archiveURLs: [URL] = []
-            for dateFolder in dateFolders {
-                guard let archives = try? fileManager.contentsOfDirectory(
-                    at: dateFolder,
-                    includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
-                    options: [.skipsHiddenFiles]
-                ) else {
+        var archiveURLs: [URL] = []
+        do {
+            var visitedFolders: Set<FileIdentity> = []
+            for entry in try Self.folderEntries(of: archivesURL) ?? [] {
+                // `stat` follows a symbolic link, and, unlike Foundation, tells a target that is
+                // gone (skipped) from one that can't be reached (a failure).
+                var info = stat()
+                guard stat(entry.path, &info) == 0 else {
+                    if errno != ENOENT {
+                        failures.append("Couldn't read “\(entry.lastPathComponent)”: \(String(cString: strerror(errno)))")
+                    }
                     continue
                 }
-                for archive in archives where archive.pathExtension == "xcarchive" {
-                    archiveURLs.append(archive)
+                // A stray file isn't a date folder; a second link to one folder isn't a second folder.
+                guard info.st_mode & S_IFMT == S_IFDIR, visitedFolders.insert(FileIdentity(info)).inserted else {
+                    continue
+                }
+                do {
+                    let folder = entry.resolvingSymlinksInPath()
+                    for archive in try Self.folderEntries(of: folder) ?? [] where archive.pathExtension == "xcarchive" {
+                        archiveURLs.append(archive)
+                    }
+                } catch {
+                    failures.append(error.localizedDescription)
                 }
             }
-
-            let archiveItems = await Self.scanConcurrently(archiveURLs, limiter: folderWalkLimiter) { archiveURL in
-                try Self.inspectArchive(at: archiveURL)
-            }
-            items.append(contentsOf: archiveItems)
+        } catch {
+            failures.append(error.localizedDescription)
         }
 
-        return items.sorted { $0.sizeBytes > $1.sizeBytes }
+        let archiveItems = await Self.scanConcurrently(archiveURLs, limiter: folderWalkLimiter) { archiveURL in
+            try Self.inspectArchive(at: archiveURL)
+        }
+        items.append(contentsOf: archiveItems)
+
+        return (items.sorted { $0.sizeBytes > $1.sizeBytes }, failures.isEmpty ? nil : failures.joined(separator: "\n"))
     }
 
     // MARK: - Private Inspection
@@ -290,6 +306,10 @@ private struct FileIdentity: Hashable {
     init?(of url: URL) {
         var info = stat()
         guard stat(url.path, &info) == 0 else { return nil }
+        self.init(info)
+    }
+
+    init(_ info: stat) {
         device = info.st_dev
         inode = info.st_ino
     }

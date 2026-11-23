@@ -17,6 +17,8 @@ XcodeSweep scans at launch. When you return to it, it rescans if the last comple
 
 Custom DerivedData and Archives locations set in Xcode's Settings → Locations are honored when they are absolute paths; a workspace-relative DerivedData location isn't scanned.
 
+A category whose folder exists but can't be read, or whose `simctl` command fails, is marked "Scan incomplete" in the sidebar and Overview, and says why in its own view, instead of looking empty. A folder that doesn't exist is simply empty.
+
 ## Deletion Safety
 
 - Filesystem items (`DerivedData`, `DeviceSupport`, leftover preview folders, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible. If `simctl` can't list the preview set, preview folders are protected, since any of them might be registered.

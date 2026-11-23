@@ -268,7 +268,7 @@ struct XcodeSweepStoreTests {
         // Then: deterministic teardown guarantees no stray updates, no error, and unscanned state
         #expect(store.inventory.scannedAt == nil)
         #expect(!store.hasCompletedScan)
-        #expect(store.scanWarnings.isEmpty)
+        #expect(store.scanFailures.isEmpty)
         #expect(store.operation == .idle)
     }
 
@@ -428,7 +428,7 @@ struct XcodeSweepStoreTests {
             lastAccessed: Date.distantPast
         )
 
-        // Seed one completed scan with one warning.
+        // Seed one completed scan with one category failure.
         let initialScan = store.startRefresh()
         for _ in 0 ..< scanSimctlListCallCount {
             let call = try await controller.nextPendingCall()
@@ -442,7 +442,7 @@ struct XcodeSweepStoreTests {
         }
         await initialScan?.value
         let completedInventory = store.inventory
-        let completedWarnings = store.scanWarnings
+        let completedFailures = store.scanFailures
 
         // Add another folder, start a rescan via startRefresh, and cancel via cancelOperation.
         try fixture.addDerivedData(
@@ -476,7 +476,7 @@ struct XcodeSweepStoreTests {
         }
 
         #expect(store.inventory == completedInventory)
-        #expect(store.scanWarnings == completedWarnings)
+        #expect(store.scanFailures == completedFailures)
         #expect(await controller.recordedArguments.count == 2 * scanSimctlListCallCount)
 
         // A follow-up refresh after cancellation completes cleanly and picks up Added-2.
@@ -875,6 +875,39 @@ struct XcodeSweepStoreTests {
         #expect(store.operation == .idle)
         #expect(store.inventory.items(in: .derivedData).map(\.path) == [keptURL])
         #expect(store.lastDeletionReport?.deletedCount == 1)
+    }
+
+    /// A category that failed must say so as soon as its result arrives, not when the slowest category ends.
+    @Test("A category's failure is shown while the rest of the scan is still running", .timeLimit(.minutes(1)))
+    func categoryFailureAppearsBeforeScanEnds() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let controller = ControllableCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
+        ))
+
+        let scan = store.startRefresh()
+        var parked: [ParkedCall<[String]>] = []
+        for _ in 0 ..< scanSimctlListCallCount {
+            try await parked.append(controller.nextPendingCall())
+        }
+        let devices = try #require(parked.first { $0.arguments == ["simctl", "list", "devices", "-j"] })
+        await controller.resume(id: devices.id, with: .failure(TestTrashError(message: "simctl unavailable")))
+
+        try await waitUntil("device failure shown") { await store.scanFailures[.simulatorDevices] != nil }
+        #expect(store.operation.isScanning)
+
+        for call in parked where call.id != devices.id {
+            let json = call.arguments.contains("devices") ? #"{"devices":{}}"# : "{}"
+            await controller.resume(id: call.id, with: .success(
+                CommandOutput(stdout: Data(json.utf8), stderr: Data(), terminationStatus: 0)
+            ))
+        }
+        _ = try await awaitResult(of: Task { await scan?.value }, within: .seconds(10)).get()
+        #expect(store.scanFailures[.simulatorDevices] == "simctl unavailable")
     }
 
     private func makeScannedStore(

@@ -17,7 +17,8 @@ struct SidebarView: View {
                 ForEach(store.inventory.categoryMetrics) { metrics in
                     SidebarCategoryRow(
                         metrics: metrics,
-                        isScanning: store.operation.isScanning(metrics.category)
+                        isScanning: store.operation.isScanning(metrics.category),
+                        failure: store.scanFailures[metrics.category]
                     )
                     .tag(SidebarSelection.category(metrics.category))
                 }
@@ -52,9 +53,10 @@ private struct SidebarOverviewRow: View {
     }
 }
 
-private struct SidebarCategoryRow: View {
+struct SidebarCategoryRow: View {
     let metrics: CategoryMetrics
     let isScanning: Bool
+    let failure: String?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -69,6 +71,9 @@ private struct SidebarCategoryRow: View {
                     Text(metrics.totalBytes, format: .byteCount(style: .file))
                         .font(.callout.monospacedDigit())
                         .foregroundStyle(metrics.totalBytes > 0 ? .primary : .secondary)
+                    if let failure {
+                        ScanFailureBadge(failure: failure)
+                    }
                     if metrics.reclaimableCount > 0 {
                         Text("\(metrics.reclaimableCount) cleanable")
                             .font(.caption2)
