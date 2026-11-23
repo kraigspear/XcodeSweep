@@ -205,4 +205,36 @@ struct XcodeStorageDeletionTests {
         #expect(report.reclaimedBytes == 4_000_000_000)
         #expect(report.failures.map(\.itemID) == ["rt-2"])
     }
+
+    @Test("Runs destructive simctl shutdown and delete commands with no timeout")
+    func deleteRunsSimctlCommandsWithoutTimeout() async throws {
+        let runner = RecordingCommandRunner()
+        let storage = XcodeStorage(
+            commandRunner: runner,
+            fileTrasher: RecordingFileTrasher()
+        )
+
+        let bootedDevice = makeStorageItem(
+            id: "sim-1",
+            category: .simulatorDevices,
+            status: .booted,
+            method: .simctlDevice(udid: "UDID-1", isBooted: true)
+        )
+        let runtime = makeStorageItem(
+            id: "rt-1",
+            category: .simulatorRuntimes,
+            status: .stale,
+            method: .simctlRuntime(identifier: "RT-1")
+        )
+
+        for try await _ in storage.delete(DeletionPlan(selection: [bootedDevice, runtime])) {}
+
+        let calls = await runner.calls
+        #expect(calls.map(\.arguments) == [
+            ["simctl", "shutdown", "UDID-1"],
+            ["simctl", "delete", "UDID-1"],
+            ["simctl", "runtime", "delete", "RT-1"],
+        ])
+        #expect(calls.allSatisfy { $0.timeout == nil })
+    }
 }

@@ -59,7 +59,7 @@ struct StorageInventoryTests {
         #expect(updated.reclaimableBytes == 10)
         #expect(updated.reclaimableItemCount == 1)
         #expect(updated.scannedAt == scannedAt)
-        #expect(updated.diskAvailableBytes == inventory.diskAvailableBytes)
+        #expect(updated.volume == inventory.volume)
     }
 
     /// Verifies a category arriving mid-scan replaces only that category and keeps the last scan date.
@@ -153,8 +153,7 @@ struct StorageInventoryTests {
         StorageInventory(
             itemsByCategory: Dictionary(grouping: items, by: \.category),
             scannedAt: scannedAt,
-            diskAvailableBytes: 500,
-            diskTotalBytes: 1000
+            volume: DiskVolume(name: "Test Volume", availableBytes: 500, totalBytes: 1000)
         )
     }
 }

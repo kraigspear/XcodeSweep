@@ -191,10 +191,13 @@ final class XcodeSweepStore {
         return nil
     }
 
-    /// Selected items that belong to the active category.
+    /// Selected items currently visible in the active category, in table order.
+    ///
+    /// Filtering keeps the selected IDs, so a hidden row is selected again when it reappears.
+    /// Hidden rows are left out of the inspector and of any deletion plan built while they are hidden.
     var selectedItems: [StorageItem] {
         guard let category = activeCategory else { return [] }
-        return selectedItemIDs.compactMap { inventory.item(withID: $0) }.filter { $0.category == category }
+        return visibleItems(for: category).filter { selectedItemIDs.contains($0.id) }
     }
 
     /// The deletion plan for the current selection.

@@ -174,7 +174,7 @@ struct StubCommandRunner: CommandRunning, Sendable {
     var devicesError: (any Error)?
     var runtimesError: (any Error)?
 
-    func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
         switch arguments {
         case ["simctl", "list", "devices", "-j"]:
             if let devicesError {
@@ -193,6 +193,25 @@ struct StubCommandRunner: CommandRunning, Sendable {
 }
 
 typealias ControllableCommandRunner = ParkedCalls<[String], CommandOutput>
+
+actor RecordingCommandRunner: CommandRunning {
+    struct Call: Equatable, Sendable {
+        let arguments: [String]
+        let timeout: Duration?
+    }
+
+    private(set) var calls: [Call] = []
+    private let stub: StubCommandRunner
+
+    init(stub: StubCommandRunner = StubCommandRunner()) {
+        self.stub = stub
+    }
+
+    func run(executableURL: URL, arguments: [String], timeout: Duration?) async throws -> CommandOutput {
+        calls.append(Call(arguments: arguments, timeout: timeout))
+        return try await stub.run(executableURL: executableURL, arguments: arguments, timeout: timeout)
+    }
+}
 
 // MARK: - FileTrashing Test Adapters
 
@@ -371,7 +390,7 @@ actor ParkedCalls<Argument: Sendable, Output: Sendable> {
 }
 
 extension ParkedCalls: CommandRunning where Argument == [String], Output == CommandOutput {
-    func run(executableURL _: URL, arguments: [String]) async throws -> CommandOutput {
+    func run(executableURL _: URL, arguments: [String], timeout _: Duration?) async throws -> CommandOutput {
         try await park(arguments)
     }
 }
@@ -431,22 +450,44 @@ func cancelAndAwaitResult<Success: Sendable>(
     of task: Task<Success, any Error>,
     within timeout: Duration
 ) async throws -> Result<Success, any Error> {
+    try await boundedResult(of: task, within: timeout, cancelling: true, waitingFor: "cancelled task finished")
+}
+
+/// The task's result, or `ConditionTimeoutError` if it doesn't finish within `timeout`, so a task
+/// that never resumes fails the test instead of hanging it.
+func awaitResult<Success: Sendable>(
+    of task: Task<Success, any Error>,
+    within timeout: Duration
+) async throws -> Result<Success, any Error> {
+    try await boundedResult(of: task, within: timeout, cancelling: false, waitingFor: "task finished")
+}
+
+/// The deadline is set before cancelling, and cancelling happens on the observer, so a slow or
+/// stuck cancellation handler counts against the bound.
+private func boundedResult<Success: Sendable>(
+    of task: Task<Success, any Error>,
+    within timeout: Duration,
+    cancelling: Bool,
+    waitingFor description: String
+) async throws -> Result<Success, any Error> {
     let deadline = ContinuousClock.now + timeout
     let outcome = OSAllocatedUnfairLock<(result: Result<Success, any Error>, finishedAt: ContinuousClock.Instant)?>(
         initialState: nil
     )
     Task.detached {
-        task.cancel()
+        if cancelling {
+            task.cancel()
+        }
         let result = await task.result
         let finishedAt = ContinuousClock.now
         outcome.withLock { $0 = (result, finishedAt) }
     }
-    try await waitUntil("cancelled task finished", timeout: deadline - ContinuousClock.now) {
+    try await waitUntil(description, timeout: deadline - ContinuousClock.now) {
         outcome.withLock { $0 != nil }
     }
     let finished = try #require(outcome.withLock { $0 })
     guard finished.finishedAt <= deadline else {
-        throw ConditionTimeoutError(description: "Cancelled task finished after its deadline")
+        throw ConditionTimeoutError(description: "Task finished after its deadline")
     }
     return finished.result
 }
