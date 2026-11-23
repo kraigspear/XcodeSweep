@@ -40,6 +40,8 @@ struct XcodeStorage: Sendable {
     let fileTrasher: any FileTrashing
     /// The clock that stamps scans and ages items.
     let now: @Sendable () -> Date
+    /// Shared by every category, so their walks together leave two pool threads free.
+    let folderWalkLimiter = FolderWalkLimiter(width: max(1, ProcessInfo.processInfo.activeProcessorCount - 2))
 
     init(
         xcodeRootURL: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -95,19 +97,21 @@ struct XcodeStorage: Sendable {
 
     // MARK: - Shared Internal Helpers
 
-    /// Inspects `inputs` concurrently, returning the items found sorted largest first.
+    /// Inspects `inputs` concurrently, as many at once as `limiter` allows, returning the items
+    /// found sorted largest first.
     ///
-    /// A child already cancelled when it starts skips its input, and an input whose `inspect` throws
-    /// contributes no item; the inspections here throw only on cancellation.
+    /// A child cancelled before its inspection starts skips its input, and an input whose `inspect`
+    /// throws contributes no item; the inspections here throw only on cancellation.
     static func scanConcurrently<Input: Sendable>(
         _ inputs: [Input],
+        limiter: FolderWalkLimiter,
         inspect: @escaping @Sendable (Input) throws -> StorageItem?
     ) async -> [StorageItem] {
         await withTaskGroup(of: StorageItem?.self, returning: [StorageItem].self) { group in
             for input in inputs {
                 group.addTask {
                     guard !Task.isCancelled else { return nil }
-                    return try? inspect(input)
+                    return try? await limiter.withPermit { try? inspect(input) }
                 }
             }
 
