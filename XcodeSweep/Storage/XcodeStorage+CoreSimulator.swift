@@ -27,9 +27,10 @@ extension XcodeStorage {
 
     // MARK: - Deletion
 
-    /// Permanently deletes a simulator device, shutting it down first.
+    /// Permanently deletes a simulator device, trying to shut it down first.
     ///
-    /// Shuts down every device rather than those booted at scan time: one may have booted since.
+    /// Tries every device rather than those booted at scan time: one may have booted since. A failed
+    /// shutdown doesn't stop the delete, which reports its own error if the device can't go.
     func deleteSimulatorDevice(udid: String) async throws {
         do {
             _ = try await commandRunner.run(

@@ -73,7 +73,7 @@ struct DeletionPlanTests {
 
         #expect(message.contains("1 filesystem item will be moved to Trash"))
         #expect(message.contains("1 simulator item will be permanently deleted"))
-        #expect(message.contains("The simulator will be shut down first if it's running."))
+        #expect(message.contains("XcodeSweep will try to shut the simulator down first."))
     }
 
     /// Verifies a trash-only confirmation does not warn about permanent deletion.

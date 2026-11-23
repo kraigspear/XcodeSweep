@@ -239,6 +239,7 @@ struct XcodeStorageDeletionTests {
     }
 
     /// A simulator booted after the scan must still be shut down before a permanent delete.
+    /// To replicate: scan → boot a shut-down simulator in Simulator.app → delete it in XcodeSweep.
     @Test("Shuts down every simulator before deleting it, whatever the scan saw")
     func shutsDownDeviceNotBootedAtScanTime() async throws {
         let runner = RecordingCommandRunner()
@@ -258,6 +259,7 @@ struct XcodeStorageDeletionTests {
         ])
     }
 
+    /// To replicate: delete a shut-down simulator; `simctl shutdown` fails, and the delete still succeeds.
     @Test("Deletes a simulator even when its shutdown fails because it is already shut down")
     func deletesWhenShutdownFails() async throws {
         let runner = RecordingCommandRunner(stub: StubCommandRunner(shutdownError: ProcessRunnerError.nonZeroExit(

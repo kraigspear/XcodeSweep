@@ -36,7 +36,7 @@ struct DeletionPlan: Identifiable, Hashable, Sendable {
         deletableItems.filter(\.deletionMethod.isPermanent).count
     }
 
-    /// Simulator devices, which deletion shuts down first if running.
+    /// Simulator devices, which deletion tries to shut down first.
     var deviceCount: Int {
         deletableItems.filter {
             if case .simctlDevice = $0.deletionMethod {
@@ -81,8 +81,8 @@ struct DeletionPlan: Identifiable, Hashable, Sendable {
         }
         if deviceCount > 0 {
             parts.append(deviceCount == 1
-                ? "The simulator will be shut down first if it's running."
-                : "Simulators will be shut down first if they're running.")
+                ? "XcodeSweep will try to shut the simulator down first."
+                : "XcodeSweep will try to shut the simulators down first.")
         }
 
         return "Estimated space to reclaim: \(formattedSize).\n\n" + parts.joined(separator: " ")
@@ -136,7 +136,7 @@ extension DeletionMethod {
         case .trashFile:
             "Moves folder to Trash (reversible)"
         case .simctlDevice:
-            "Shuts down simulator if running, then permanently deletes via xcrun simctl"
+            "Tries to shut down simulator, then permanently deletes via xcrun simctl"
         case .simctlRuntime:
             "Permanently deletes runtime disk image via xcrun simctl runtime delete"
         case let .notDeletable(reason):

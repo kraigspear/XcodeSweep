@@ -16,7 +16,7 @@ A native macOS SwiftUI utility for inspecting and safely cleaning Xcode build an
 ## Deletion Safety
 
 - Filesystem items (`DerivedData`, `DeviceSupport`, `Previews`, `Archives`, shared caches) are moved to **Trash** (`FileManager.trashItem`) so deletions are reversible.
-- Simulator devices and runtime disk images are removed through **`xcrun simctl`** after explicit confirmation (each simulator is shut down first if it's running).
+- Simulator devices and runtime disk images are removed through **`xcrun simctl`** after explicit confirmation (XcodeSweep tries to shut each simulator down first).
 - App Sandbox is intentionally disabled (`com.apple.security.app-sandbox = false`) so the app can inspect `~/Library/Developer/` and invoke `/usr/bin/xcrun simctl`.
 
 ## Requirements
