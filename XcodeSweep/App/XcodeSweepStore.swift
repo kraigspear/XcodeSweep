@@ -196,7 +196,8 @@ final class XcodeSweepStore {
     /// Filtering keeps the selected IDs, so a hidden row is selected again when it reappears.
     /// Hidden rows are left out of the inspector and of any deletion plan built while they are hidden.
     var selectedItems: [StorageItem] {
-        guard let category = activeCategory else { return [] }
+        // The footer, inspector, and menu read this constantly; don't sort a category for nothing.
+        guard !selectedItemIDs.isEmpty, let category = activeCategory else { return [] }
         return visibleItems(for: category).filter { selectedItemIDs.contains($0.id) }
     }
 
