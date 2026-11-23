@@ -486,8 +486,9 @@ struct XcodeStorageScanTests {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
         let now = testISO8601Date("2026-11-21T10:00:00Z")
+        // A lowercase folder for an uppercase simctl UDID: one device, so one row.
         let registeredURL = try fixture.addPreviewDevice(
-            udid: "REG-1", name: "iPhone 18 Pro", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+            udid: "abcdef01-reg1", name: "iPhone 18 Pro", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
         )
         let leftoverURL = try fixture.addPreviewDevice(
             udid: "LEFTOVER-1", name: "iPhone 17", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-2", modifiedDate: now
@@ -495,7 +496,7 @@ struct XcodeStorageScanTests {
         let previewJSON = """
         {"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-27-3":[{
           "dataPath":"\(registeredURL.path)/data","dataPathSize":2000,"logPathSize":500,
-          "udid":"REG-1","lastUsedAt":"2026-11-17T08:24:56Z","isAvailable":true,"state":"Shutdown","name":"iPhone 18 Pro"
+          "udid":"ABCDEF01-REG1","lastUsedAt":"2026-09-01T00:00:00Z","isAvailable":true,"state":"Shutdown","name":"iPhone 18 Pro"
         }]}}
         """
         let storage = XcodeStorage(
@@ -509,9 +510,11 @@ struct XcodeStorageScanTests {
 
         let previews = try #require(snapshot.itemsByCategory[.previews])
         let registered = try #require(previews.first { $0.name == "iPhone 18 Pro" })
-        #expect(registered.deletionMethod == .simctlDevice(udid: "REG-1", deviceSet: .previews))
+        #expect(registered.deletionMethod == .simctlDevice(udid: "ABCDEF01-REG1", deviceSet: .previews))
         #expect(registered.sizeBytes == 2500)
-        #expect(registered.status == .active)
+        // Aged by simctl's last use, not the recently modified folder.
+        #expect(registered.lastUsedDate == testISO8601Date("2026-09-01T00:00:00Z"))
+        #expect(registered.status == .stale)
         let leftover = try #require(previews.first { $0.name == "iPhone 17" })
         #expect(leftover.deletionMethod == .trashFile(leftoverURL))
         #expect(previews.count == 2)

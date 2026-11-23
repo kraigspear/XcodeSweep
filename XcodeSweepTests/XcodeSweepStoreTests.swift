@@ -641,7 +641,7 @@ struct XcodeSweepStoreTests {
         ))
         let target = makeStorageItem(id: "dd", method: .trashFile(fixture.rootURL.appendingPathComponent("dd")))
 
-        // Given: a scan whose simctl commands are both in flight
+        // Given: a scan whose three simctl list commands are all in flight
         let scan = store.startRefresh()
         try await waitUntil("simctl list commands started") { await runner.startedCount == scanSimctlListCallCount }
 

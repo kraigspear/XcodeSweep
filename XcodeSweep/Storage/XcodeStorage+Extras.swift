@@ -85,10 +85,11 @@ extension XcodeStorage {
             warning = error is CancellationError ? nil : "SwiftUI Previews: \(error.localizedDescription)"
         }
 
+        // Uppercased: the volume ignores case, so a folder and simctl may spell one UDID differently.
         let registeredUDIDs = Set((registered ?? []).compactMap { item -> String? in
-            if case let .simctlDevice(udid, _) = item.deletionMethod { udid } else { nil }
+            if case let .simctlDevice(udid, _) = item.deletionMethod { udid.uppercased() } else { nil }
         })
-        let leftovers = directories.filter { !registeredUDIDs.contains($0.lastPathComponent) }
+        let leftovers = directories.filter { !registeredUDIDs.contains($0.lastPathComponent.uppercased()) }
         let canTrashLeftovers = registered != nil
 
         let leftoverItems = await Self.scanConcurrently(leftovers, limiter: folderWalkLimiter) { url in

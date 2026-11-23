@@ -210,7 +210,8 @@ struct StubCommandRunner: CommandRunning, Sendable {
 
 typealias ControllableCommandRunner = ParkedCalls<[String], CommandOutput>
 
-/// The `simctl` list commands every scan runs: devices, runtimes, and preview devices.
+/// The `simctl` list commands a scan of `TempXcodeFixture` runs: devices, runtimes, and preview
+/// devices. Without a preview set folder, a scan skips the third.
 let scanSimctlListCallCount = 3
 
 actor RecordingCommandRunner: CommandRunning {
