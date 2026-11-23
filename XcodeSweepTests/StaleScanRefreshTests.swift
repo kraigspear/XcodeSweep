@@ -8,11 +8,11 @@ import Testing
 struct StaleScanRefreshTests {
     private let scanTime = testISO8601Date("2026-11-21T10:00:00Z")
 
-    @Test("An idle store whose scan is older than the limit rescans")
+    @Test("An idle store whose scan is over 15 minutes old rescans")
     func rescansWhenOlderThanLimit() async throws {
         let (store, clock, fixture) = try await makeScannedStore()
         defer { fixture.cleanup() }
-        let later = scanTime.addingTimeInterval(XcodeSweepStore.staleScanAge + 1)
+        let later = scanTime.addingTimeInterval(901)
         clock.withLock { $0 = later }
 
         let rescan = try #require(store.refreshIfStale())
@@ -21,11 +21,11 @@ struct StaleScanRefreshTests {
         #expect(store.inventory.scannedAt == later)
     }
 
-    @Test("A scan within the limit is kept")
+    @Test("A scan exactly 15 minutes old is kept")
     func keepsScanWithinLimit() async throws {
         let (store, clock, fixture) = try await makeScannedStore()
         defer { fixture.cleanup() }
-        clock.withLock { $0 = scanTime.addingTimeInterval(XcodeSweepStore.staleScanAge - 1) }
+        clock.withLock { $0 = scanTime.addingTimeInterval(900) }
 
         #expect(store.refreshIfStale() == nil)
         #expect(store.operation == .idle)
@@ -36,7 +36,7 @@ struct StaleScanRefreshTests {
     func pendingConfirmationBlocksRescan() async throws {
         let (store, clock, fixture) = try await makeScannedStore()
         defer { fixture.cleanup() }
-        clock.withLock { $0 = scanTime.addingTimeInterval(XcodeSweepStore.staleScanAge + 1) }
+        clock.withLock { $0 = scanTime.addingTimeInterval(901) }
         store.requestDelete(items: store.inventory.items(in: .derivedData))
         let pending = try #require(store.pendingDeletion)
 

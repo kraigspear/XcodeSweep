@@ -115,7 +115,7 @@ final class XcodeSweepStore {
     /// A rescan takes seconds and blocks cleanup, so a quick switch to Finder or Xcode shouldn't
     /// trigger one. But a build changes DerivedData within minutes, so a user returning after one,
     /// or after a break, should see current sizes and statuses.
-    nonisolated static let staleScanAge: TimeInterval = 15 * 60
+    private static let staleScanAge: TimeInterval = 15 * 60
 
     /// Rescans when the last completed scan is older than `staleScanAge`.
     ///

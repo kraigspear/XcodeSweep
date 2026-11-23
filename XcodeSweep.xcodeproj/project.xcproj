@@ -76,7 +76,7 @@
         { "path": "ProcessRunnerTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "TestSupport.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "StaleScanRefreshTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
-{ "path": "StorageCategoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "StorageCategoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "StorageInventoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeSweepStorePreviewTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeStorageCancellationTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
