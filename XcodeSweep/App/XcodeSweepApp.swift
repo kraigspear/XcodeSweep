@@ -1,6 +1,27 @@
 import SwiftUI
 
+/// Chooses the app to run. As a test host it opens no main window, because that window scans the
+/// real `~/Library/Developer` as soon as it appears.
 @main
+enum XcodeSweepLauncher {
+    static func main() {
+        // Xcode sets this only in a process hosting tests.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            TestHostApp.main()
+        } else {
+            XcodeSweepApp.main()
+        }
+    }
+}
+
+private struct TestHostApp: App {
+    var body: some Scene {
+        Settings {
+            EmptyView()
+        }
+    }
+}
+
 struct XcodeSweepApp: App {
     @State private var xcodeSweepStore = XcodeSweepStore()
 
