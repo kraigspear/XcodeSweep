@@ -80,6 +80,8 @@ struct XcodeStorageCancellationTests {
     )
     func cancelledShutdownReturningNormallyStillSkipsDelete() async throws {
         let runner = IgnoreCancelShutdownRunner()
+        // Unique, so this test's log entries can't be confused with another's.
+        let udid = "UDID-BOOTED-\(UUID().uuidString)"
         let storage = XcodeStorage(
             commandRunner: runner,
             fileTrasher: RecordingFileTrasher()
@@ -95,7 +97,7 @@ struct XcodeStorageCancellationTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
-            deletionMethod: .simctlDevice(udid: "UDID-BOOTED"),
+            deletionMethod: .simctlDevice(udid: udid),
             metadata: []
         )
 
@@ -112,7 +114,10 @@ struct XcodeStorageCancellationTests {
             try await deleteTask.value
         }
 
-        #expect(await runner.recordedArguments == [["simctl", "shutdown", "UDID-BOOTED"]])
+        #expect(await runner.recordedArguments == [["simctl", "shutdown", udid]])
+        // Nothing reached simctl delete, so the log mustn't suggest the device may be gone.
+        let entries = try deletionLogEntries(endingWith: udid)
+        #expect(entries.map(\.composedMessage) == ["outcome=skipped method=simctlDevice target=\(udid)"])
     }
 
     @Test(

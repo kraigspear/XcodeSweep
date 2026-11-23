@@ -44,19 +44,23 @@ extension XcodeStorage {
             // Fails when the device is already shut down; delete reports any real problem.
         }
         try Task.checkCancellation()
-        _ = try await commandRunner.run(
-            executableURL: Self.xcrunURL,
-            arguments: ["simctl", "delete", udid],
-            timeout: nil
-        )
+        try await Self.removing {
+            _ = try await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: ["simctl", "delete", udid],
+                timeout: nil
+            )
+        }
     }
 
     func deleteSimulatorRuntime(identifier: String) async throws {
-        _ = try await commandRunner.run(
-            executableURL: Self.xcrunURL,
-            arguments: ["simctl", "runtime", "delete", identifier],
-            timeout: nil
-        )
+        try await Self.removing {
+            _ = try await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: ["simctl", "runtime", "delete", identifier],
+                timeout: nil
+            )
+        }
     }
 
     // MARK: - Shared Formatting

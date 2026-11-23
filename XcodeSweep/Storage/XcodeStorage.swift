@@ -80,16 +80,28 @@ struct XcodeStorage: Sendable {
     }
 
     /// `item` must come from `DeletionPlan.deletableItems`; a protected item traps.
+    ///
+    /// - Throws: `RemovalInterrupted` if cancelled once the move or removing command began;
+    ///   `CancellationError` if cancelled before it.
     fileprivate func remove(_ item: StorageItem) async throws {
         switch item.deletionMethod {
         case let .trashFile(url):
-            try await fileTrasher.trashItem(at: url)
+            try await Self.removing { try await fileTrasher.trashItem(at: url) }
         case let .simctlDevice(udid):
             try await deleteSimulatorDevice(udid: udid)
         case let .simctlRuntime(identifier):
             try await deleteSimulatorRuntime(identifier: identifier)
         case .notDeletable:
             preconditionFailure("DeletionPlan excludes protected items")
+        }
+    }
+
+    /// Runs the step that removes an item, reporting cancellation during it as `RemovalInterrupted`.
+    static func removing(_ removal: () async throws -> Void) async throws {
+        do {
+            try await removal()
+        } catch is CancellationError {
+            throw RemovalInterrupted()
         }
     }
 
@@ -165,6 +177,9 @@ struct XcodeStorage: Sendable {
         return current
     }
 }
+
+/// Cancellation after an item's removal began, so the item may be gone.
+struct RemovalInterrupted: Error {}
 
 // MARK: - Deletion Logging
 
@@ -454,10 +469,17 @@ private struct DeletionStream: AsyncSequence, Sendable {
                     removed.append(item)
                     reclaimedBytes += item.sizeBytes
                     return .deleted(itemID: item.id, progress: progress(completing: index))
-                } catch is CancellationError {
+                } catch is RemovalInterrupted {
                     // A stopped trash move or simctl command may still have taken effect.
                     Self.logger.notice("""
                     outcome=unknown method=\(item.deletionMethod.logName, privacy: .public) \
+                    target=\(item.deletionMethod.logTarget, privacy: .public)
+                    """)
+                    phase = .done
+                    throw CancellationError()
+                } catch is CancellationError {
+                    Self.logger.notice("""
+                    outcome=skipped method=\(item.deletionMethod.logName, privacy: .public) \
                     target=\(item.deletionMethod.logTarget, privacy: .public)
                     """)
                     phase = .done
