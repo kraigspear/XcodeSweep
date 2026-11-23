@@ -83,6 +83,9 @@ struct ContentView: View {
         .task {
             await store.refreshIfNeeded()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            store.refreshIfStale()
+        }
     }
 }
 
