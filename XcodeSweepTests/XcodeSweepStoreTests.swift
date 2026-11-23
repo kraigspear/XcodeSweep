@@ -598,6 +598,7 @@ struct XcodeSweepStoreTests {
         store.navigate(to: .category(.derivedData))
         store.selectAllDeletableInActiveCategory()
         #expect(store.selectedItemIDs.count == 2)
+        let originalIDs = store.selectedItemIDs
 
         // When: a search hides one of them
         store.searchText = "SampleApp"
@@ -615,6 +616,10 @@ struct XcodeSweepStoreTests {
         store.statusFilter = .worktree
         #expect(store.selectedItems.isEmpty)
         #expect(store.selectionPlan.isEmpty)
+
+        // Clearing the filter brings the hidden rows back, still selected.
+        store.statusFilter = .all
+        #expect(Set(store.selectedItems.map(\.id)) == originalIDs)
     }
 
     /// Stop can't let the next operation in while the stopped one is still tearing down, such as a
