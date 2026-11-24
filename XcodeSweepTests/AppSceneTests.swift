@@ -66,6 +66,53 @@ struct AppSceneTests {
         #expect(card.contains { $0.contains("Scan incomplete") }, "Recognized: \(card)")
     }
 
+    /// Verifies the Overview card and sidebar row name reclaimable items "Recommended", the word every other screen uses.
+    /// To replicate: scan a Mac with an unused DerivedData folder → read the DerivedData card's button and sidebar row.
+    @Test("The Overview card and sidebar row call reclaimable items Recommended")
+    func reclaimableCountIsLabelledRecommended() throws {
+        let metrics = CategoryMetrics(
+            category: .simulatorDevices, itemCount: 59, totalBytes: 276_910_000_000,
+            reclaimableCount: 30, reclaimableBytes: 2_000
+        )
+
+        // The narrowest card the Overview grid allows, and a row narrower than the narrowest sidebar
+        // gives (about 185), so a label that doesn't fit is truncated or wrapped and fails here.
+        let card = try recognizedText(in: CategoryCardView(
+            metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+        ).frame(width: 290))
+        let row = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: nil)
+            .frame(width: 180))
+
+        #expect(card.contains { $0.contains("Recommended") }, "Recognized: \(card)")
+        // The count and the word on one line; a wrapped caption reads as two.
+        #expect(row.contains { $0.hasSuffix(" recommended") }, "Recognized: \(row)")
+        #expect(!(card + row).contains { $0.localizedCaseInsensitiveContains("cleanable") }, "Recognized: \(card + row)")
+    }
+
+    /// Verifies the "N recommended" caption takes no room from the row's title: it once sat beside the title,
+    /// so the longer word truncated titles that fit before.
+    /// To replicate: scan a Mac with an unused simulator runtime → read its sidebar row at the default width.
+    @Test("A sidebar row's recommended caption leaves its title the same room")
+    func recommendedCaptionLeavesTitleItsRoom() throws {
+        let width: CGFloat = 240
+        let plain = CategoryMetrics(
+            category: .simulatorRuntimes, itemCount: 59, totalBytes: 276_910_000_000,
+            reclaimableCount: 0, reclaimableBytes: 0
+        )
+        let recommending = CategoryMetrics(
+            category: .simulatorRuntimes, itemCount: 59, totalBytes: 276_910_000_000,
+            reclaimableCount: 30, reclaimableBytes: 2_000
+        )
+
+        let plainRow = try recognizedText(in: SidebarCategoryRow(metrics: plain, isScanning: false, failure: nil)
+            .frame(width: width))
+        let recommendingRow = try recognizedText(in: SidebarCategoryRow(metrics: recommending, isScanning: false, failure: nil)
+            .frame(width: width))
+
+        #expect(plainRow.contains("Simulator Runtimes"), "Recognized: \(plainRow)")
+        #expect(recommendingRow.contains("Simulator Runtimes"), "Recognized: \(recommendingRow)")
+    }
+
     #if DEBUG && canImport(SwiftUI)
         /// A filter that hides every row must not hide why some rows may be missing.
         @Test("A filtered category view still explains a failed scan")
@@ -112,8 +159,13 @@ struct AppSceneTests {
     }
 
     private func recognizedText(in view: some View) throws -> [String] {
-        // Opaque, since recognition finds nothing on a transparent render.
-        let renderer = ImageRenderer(content: view.background(.white).environment(\.colorScheme, .light))
+        // Opaque, since recognition finds nothing on a transparent render. The locale is pinned because
+        // sizes are formatted for it, and a longer size changes what fits beside it.
+        let renderer = ImageRenderer(
+            content: view.background(.white)
+                .environment(\.colorScheme, .light)
+                .environment(\.locale, Locale(identifier: "en_US"))
+        )
         renderer.scale = 3
         let image = try #require(renderer.cgImage)
         let request = VNRecognizeTextRequest()
