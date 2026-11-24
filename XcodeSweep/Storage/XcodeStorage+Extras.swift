@@ -212,9 +212,9 @@ extension XcodeStorage {
 
     /// The module cache ages like a DerivedData project folder, since the same builds use it: clearing
     /// one still in use only makes it grow back while slowing every project's next build. Other
-    /// folders aren't recommended: most are build caches, and clearing one can slow the builds that use it. In a custom
-    /// DerivedData folder an unknown one may not be Xcode's at all, so it is protected, and left
-    /// unmeasured so it can't count as Xcode storage.
+    /// folders aren't recommended: most are build caches, and clearing one can slow the builds that
+    /// use it. In a custom DerivedData folder an unknown one may not be Xcode's at all, so it is
+    /// protected, and left unmeasured so it can't count as Xcode storage.
     private static func inspectSharedCache(
         at url: URL,
         inCustomFolder: Bool,
@@ -240,7 +240,7 @@ extension XcodeStorage {
                 ]
             )
         }
-        let modified = modificationDate(of: url)
+        let modified = isModuleCache ? newestModificationDate(ofFolderAndChildren: url) : modificationDate(of: url)
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
@@ -259,6 +259,16 @@ extension XcodeStorage {
                 MetadataEntry(key: "Path", value: url.path),
             ]
         )
+    }
+
+    /// The newest date of `url` and its direct children. A build writes modules into the cache's
+    /// hash subfolders, which leaves the cache folder's own date unchanged.
+    private static func newestModificationDate(ofFolderAndChildren url: URL) -> Date? {
+        let children = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        return ([url] + children).compactMap(modificationDate(of:)).max()
     }
 
     private static func inspectArchive(at url: URL) throws(CancellationError) -> StorageItem {

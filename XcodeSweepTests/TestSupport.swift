@@ -87,8 +87,9 @@ struct TempXcodeFixture {
             .appendingPathComponent("DerivedData/ModuleCache.noindex", isDirectory: true)
         try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
         if payloadBytes > 0 {
-            try Data(repeating: 0xBB, count: payloadBytes)
-                .write(to: cacheURL.appendingPathComponent("module.pcm"))
+            let moduleURL = cacheURL.appendingPathComponent("module.pcm")
+            try Data(repeating: 0xBB, count: payloadBytes).write(to: moduleURL)
+            try FileManager.default.setAttributes([.modificationDate: modifiedDate], ofItemAtPath: moduleURL.path)
         }
         try FileManager.default.setAttributes([.modificationDate: modifiedDate], ofItemAtPath: cacheURL.path)
         return cacheURL
