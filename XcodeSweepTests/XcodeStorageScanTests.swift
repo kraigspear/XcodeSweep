@@ -775,23 +775,42 @@ struct XcodeStorageScanTests {
         #expect(snapshot.itemsByCategory[.archivesAndCaches]?.map(\.name) == ["ReadableApp"])
     }
 
-    /// A folder listed but gone, or unreachable, by the time it is identified might be a
-    /// registered device's folder, so it must not be offered for Trash.
-    @Test("A preview folder that can't be identified after listing is left out")
-    func unidentifiablePreviewFolderIsLeftOut() throws {
+    /// A folder listed but gone by the time it is identified might have been a registered device's
+    /// folder, so it must not be offered for Trash.
+    @Test("A preview folder that vanishes after listing is left out", .timeLimit(.minutes(1)))
+    func previewFolderVanishingAfterListingIsLeftOut() async throws {
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
-        let kept = fixture.rootURL.appendingPathComponent("Kept", isDirectory: true)
-        let vanished = fixture.rootURL.appendingPathComponent("Vanished", isDirectory: true)
-        try FileManager.default.createDirectory(at: kept, withIntermediateDirectories: true)
-        let keptIdentity = try #require(FileIdentity(of: kept))
-
-        let leftovers = XcodeStorage.leftoverPreviewFolders(
-            [kept, vanished],
-            registeredFolders: [],
-            identity: { $0 == vanished ? nil : keptIdentity }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let kept = try fixture.addPreviewDevice(
+            udid: "KEPT-1", name: "Kept", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        let vanishing = try fixture.addPreviewDevice(
+            udid: "VANISHING-1", name: "Vanishing", runtime: "com.apple.CoreSimulator.SimRuntime.iOS-27-3", modifiedDate: now
+        )
+        // The set is listed before simctl runs, so removing a folder here lands between listing and lookup.
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: RemovingOnPreviewListRunner(folder: vanishing),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
         )
 
-        #expect(leftovers == [kept])
+        let previews = try #require(try await finalScanSnapshot(from: storage).itemsByCategory[.previews])
+
+        #expect(previews.map(\.path) == [kept])
+        #expect(previews.first?.deletionMethod == .trashFile(kept))
+    }
+}
+
+/// Answers like `StubCommandRunner`, and removes `folder` when the preview set is listed.
+private struct RemovingOnPreviewListRunner: CommandRunning {
+    let folder: URL
+
+    func run(executableURL: URL, arguments: [String], timeout: Duration?) async throws -> CommandOutput {
+        if arguments.contains("previews") {
+            try FileManager.default.removeItem(at: folder)
+        }
+        return try await StubCommandRunner().run(executableURL: executableURL, arguments: arguments, timeout: timeout)
     }
 }

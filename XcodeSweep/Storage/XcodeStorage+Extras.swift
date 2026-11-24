@@ -99,7 +99,10 @@ extension XcodeStorage {
                 unlocatedUDIDs.insert(udid.uppercased())
             }
         }
-        let leftovers = Self.leftoverPreviewFolders(directories, registeredFolders: registeredFolders)
+        // A folder that can't be identified vanished or can't be reached, so it isn't offered at all.
+        let leftovers = directories.filter { url in
+            FileIdentity(of: url).map { !registeredFolders.contains($0) } ?? false
+        }
         let protectedUDIDs = unlocatedUDIDs
 
         let leftoverItems = await Self.scanConcurrently(leftovers, limiter: folderWalkLimiter) { url in
@@ -141,20 +144,6 @@ extension XcodeStorage {
 
         let items = ((registered ?? []) + leftoverItems).sorted { $0.sizeBytes > $1.sizeBytes }
         return (items, failures.isEmpty ? nil : failures.joined(separator: "\n"))
-    }
-
-    /// The folders in `directories` that aren't a registered device's folder.
-    ///
-    /// A folder that can't be identified vanished or can't be reached since it was listed, so it
-    /// isn't offered at all: it may be a registered device's folder that Trash would orphan.
-    static func leftoverPreviewFolders(
-        _ directories: [URL],
-        registeredFolders: Set<FileIdentity>,
-        identity: (URL) -> FileIdentity? = FileIdentity.init(of:)
-    ) -> [URL] {
-        directories.filter { url in
-            identity(url).map { !registeredFolders.contains($0) } ?? false
-        }
     }
 
     // MARK: - Archives & Caches
@@ -310,7 +299,7 @@ extension XcodeStorage {
 }
 
 /// A file's volume and inode, equal for every path that reaches it.
-struct FileIdentity: Hashable {
+private struct FileIdentity: Hashable {
     let device: dev_t
     let inode: ino_t
 
