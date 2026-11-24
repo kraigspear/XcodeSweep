@@ -57,6 +57,7 @@ struct XcodeStorageCancellationTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
+            statusExplanation: "",
             deletionMethod: .simctlDevice(udid: "UDID-BOOTED"),
             metadata: []
         )
@@ -70,6 +71,7 @@ struct XcodeStorageCancellationTests {
             path: URL(fileURLWithPath: "/tmp/trailing"),
             workspacePath: nil,
             status: .orphaned,
+            statusExplanation: "",
             deletionMethod: .trashFile(URL(fileURLWithPath: "/tmp/trailing")),
             metadata: []
         )
@@ -127,6 +129,7 @@ struct XcodeStorageCancellationTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
+            statusExplanation: "",
             deletionMethod: .simctlDevice(udid: udid),
             metadata: []
         )
@@ -171,6 +174,7 @@ struct XcodeStorageCancellationTests {
             path: URL(fileURLWithPath: "/tmp/sample"),
             workspacePath: nil,
             status: .orphaned,
+            statusExplanation: "",
             deletionMethod: .trashFile(URL(fileURLWithPath: "/tmp/sample")),
             metadata: []
         )

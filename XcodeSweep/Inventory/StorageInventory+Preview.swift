@@ -94,6 +94,7 @@
                 path: path,
                 workspacePath: workspacePath,
                 status: status,
+                statusExplanation: "Sample explanation of why this item is \(status.label.lowercased()).",
                 deletionMethod: method ?? .trashFile(path),
                 metadata: [MetadataEntry(key: "Source", value: "Preview sample")]
             )

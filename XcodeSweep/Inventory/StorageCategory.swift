@@ -79,9 +79,21 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
     }
 
     /// `.stale` once `lastUsed` is more than `staleAfterDays` before `now`; otherwise `.active`.
-    func ageStatus(lastUsed: Date?, now: Date) -> ItemStatus {
-        guard let staleAfterDays, let lastUsed else { return .active }
-        return now.timeIntervalSince(lastUsed) > TimeInterval(staleAfterDays) * 86400 ? .stale : .active
+    /// The explanation comes with the status so the two can't disagree.
+    func ageAssessment(lastUsed: Date?, now: Date) -> (status: ItemStatus, explanation: String) {
+        guard let staleAfterDays else {
+            return (.active, "Never counts as unused, whatever its age.")
+        }
+        guard let lastUsed else {
+            return (.active, "Last use is unknown, so it isn't counted as unused.")
+        }
+        let secondsPerDay: TimeInterval = 86400
+        let age = now.timeIntervalSince(lastUsed)
+        guard age > TimeInterval(staleAfterDays) * secondsPerDay else {
+            return (.active, "Used within the \(staleAfterDays)-day limit for \(title).")
+        }
+        let daysSinceUse = Int(age / secondsPerDay)
+        return (.stale, "Last used \(daysSinceUse) days ago, past the \(staleAfterDays)-day limit for \(title).")
     }
 
     /// Status filters worth offering; statuses a category never produces are left out.

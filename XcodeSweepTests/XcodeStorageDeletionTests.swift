@@ -85,6 +85,7 @@ struct XcodeStorageDeletionTests {
             path: nil,
             workspacePath: nil,
             status: .booted,
+            statusExplanation: "",
             deletionMethod: .simctlDevice(udid: "UDID-1"),
             metadata: []
         )
@@ -98,6 +99,7 @@ struct XcodeStorageDeletionTests {
             path: nil,
             workspacePath: nil,
             status: .stale,
+            statusExplanation: "",
             deletionMethod: .simctlRuntime(identifier: "RT-2"),
             metadata: []
         )
@@ -111,6 +113,7 @@ struct XcodeStorageDeletionTests {
             path: nil,
             workspacePath: nil,
             status: .systemManaged,
+            statusExplanation: "",
             deletionMethod: .notDeletable(reason: "Managed by Xcode"),
             metadata: []
         )

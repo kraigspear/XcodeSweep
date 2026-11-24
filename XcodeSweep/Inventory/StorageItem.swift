@@ -112,6 +112,8 @@ struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
     /// The project or workspace a DerivedData folder was built from.
     let workspacePath: String?
     let status: ItemStatus
+    /// One sentence on why the scan gave the item its status, written where that is decided.
+    let statusExplanation: String
     let deletionMethod: DeletionMethod
     let metadata: [MetadataEntry]
 

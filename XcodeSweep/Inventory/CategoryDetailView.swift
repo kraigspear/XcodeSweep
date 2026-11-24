@@ -61,6 +61,7 @@ struct CategoryDetailView: View {
 
                     TableColumn("Status", value: \.statusSortRank) { item in
                         StatusBadgeView(status: item.status)
+                            .help(item.statusExplanation)
                     }
                     .width(min: 88, ideal: 105, max: 130)
 
@@ -243,6 +244,7 @@ private struct SelectionActionFooter: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(operation.isDeleting)
+                .help("Select items that are \(ItemStatus.reclaimableStatusSummary)")
 
             Button("Select All", action: onSelectAll)
                 .buttonStyle(.bordered)

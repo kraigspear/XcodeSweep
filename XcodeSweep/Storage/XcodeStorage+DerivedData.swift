@@ -80,7 +80,7 @@ extension XcodeStorage {
         let sizeBytes = try DirectorySizer.allocatedSize(of: folderURL)
 
         let presence = workspacePath.map(workspacePresence(atPath:)) ?? .missing
-        let status = classifyDerivedDataStatus(
+        let assessment = assessDerivedData(
             workspacePath: workspacePath,
             presence: presence,
             lastAccessed: lastAccessed,
@@ -89,7 +89,7 @@ extension XcodeStorage {
         )
 
         let displayName = projectDisplayName(folderName: folderName, workspacePath: workspacePath)
-        let subtitle = workspaceSubtitle(workspacePath: workspacePath, status: status, folderName: folderName)
+        let subtitle = workspaceSubtitle(workspacePath: workspacePath, status: assessment.status, folderName: folderName)
 
         var metadata: [MetadataEntry] = [
             MetadataEntry(key: "Folder", value: folderName),
@@ -111,28 +111,32 @@ extension XcodeStorage {
             lastUsedDate: lastAccessed,
             path: folderURL,
             workspacePath: workspacePath,
-            status: status,
+            status: assessment.status,
+            statusExplanation: assessment.explanation,
             deletionMethod: .trashFile(folderURL),
             metadata: metadata
         )
     }
 
-    private static func classifyDerivedDataStatus(
+    private static func assessDerivedData(
         workspacePath: String?,
         presence: WorkspacePresence,
         lastAccessed: Date?,
         now: Date,
         fileManager: FileManager
-    ) -> ItemStatus {
-        guard let workspacePath, !workspacePath.isEmpty, presence != .missing else {
-            return .orphaned
+    ) -> (status: ItemStatus, explanation: String) {
+        guard let workspacePath, !workspacePath.isEmpty else {
+            return (.orphaned, "This folder has no readable record of its project, so nothing is known to use it.")
+        }
+        guard presence != .missing else {
+            return (.orphaned, "Its project is no longer at \(abbreviatingHome(in: workspacePath)).")
         }
 
         if isWorktreePath(workspacePath, fileManager: fileManager) {
-            return .worktree
+            return (.worktree, "Its project path looks like a git worktree, which counts as in use whatever its age.")
         }
 
-        return StorageCategory.derivedData.ageStatus(lastUsed: lastAccessed, now: now)
+        return StorageCategory.derivedData.ageAssessment(lastUsed: lastAccessed, now: now)
     }
 
     /// Whether the workspace at `path` exists, is provably gone, or can't be checked.
@@ -230,14 +234,15 @@ extension XcodeStorage {
         guard let workspacePath else {
             return "Missing info.plist — \(folderName)"
         }
-        let shortened = workspacePath.replacingOccurrences(
-            of: FileManager.default.homeDirectoryForCurrentUser.path,
-            with: "~"
-        )
+        let shortened = abbreviatingHome(in: workspacePath)
         if status == .orphaned {
             return "Missing: \(shortened)"
         }
         return shortened
+    }
+
+    private static func abbreviatingHome(in path: String) -> String {
+        path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
     }
 }
 

@@ -29,7 +29,7 @@ extension XcodeStorage {
         let items = await Self.scanConcurrently(candidates, limiter: folderWalkLimiter) { candidate in
             let size = try DirectorySizer.allocatedSize(of: candidate.url)
             let modified = Self.modificationDate(of: candidate.url)
-            let status = StorageCategory.deviceSupport.ageStatus(lastUsed: modified, now: now)
+            let assessment = StorageCategory.deviceSupport.ageAssessment(lastUsed: modified, now: now)
 
             return StorageItem(
                 id: "deviceSupport:\(candidate.url.path)",
@@ -40,7 +40,8 @@ extension XcodeStorage {
                 lastUsedDate: modified,
                 path: candidate.url,
                 workspacePath: nil,
-                status: status,
+                status: assessment.status,
+                statusExplanation: assessment.explanation,
                 deletionMethod: .trashFile(candidate.url),
                 metadata: [
                     MetadataEntry(key: "Platform", value: candidate.platformLabel),
@@ -115,7 +116,7 @@ extension XcodeStorage {
             let name = (plist?["name"] as? String) ?? url.lastPathComponent
             let runtimeLabel = (plist?["runtime"] as? String).map(Self.readableRuntimeName(from:))
             let subtitle = runtimeLabel.map { "\($0) • \(url.lastPathComponent)" } ?? url.lastPathComponent
-            let status = StorageCategory.previews.ageStatus(lastUsed: modified, now: now)
+            let assessment = StorageCategory.previews.ageAssessment(lastUsed: modified, now: now)
 
             var metadata: [MetadataEntry] = [
                 MetadataEntry(key: "UDID", value: url.lastPathComponent),
@@ -134,7 +135,8 @@ extension XcodeStorage {
                 lastUsedDate: modified,
                 path: url,
                 workspacePath: nil,
-                status: status,
+                status: assessment.status,
+                statusExplanation: assessment.explanation,
                 deletionMethod: canTrash
                     ? .trashFile(url)
                     : .notDeletable(reason: "simctl couldn't confirm this folder isn't a registered preview device"),
@@ -198,7 +200,7 @@ extension XcodeStorage {
         }
 
         let archiveItems = await Self.scanConcurrently(archiveURLs, limiter: folderWalkLimiter) { archiveURL in
-            try Self.inspectArchive(at: archiveURL)
+            try Self.inspectArchive(at: archiveURL, now: now)
         }
         items.append(contentsOf: archiveItems)
 
@@ -233,6 +235,7 @@ extension XcodeStorage {
                 path: url,
                 workspacePath: nil,
                 status: .active,
+                statusExplanation: "Not recognized as Xcode's, so it's left alone and not counted.",
                 deletionMethod: .notDeletable(reason: "Not recognized as Xcode's, in a custom DerivedData folder that may hold other files"),
                 metadata: [
                     MetadataEntry(key: "Type", value: "Unrecognized Folder"),
@@ -241,6 +244,9 @@ extension XcodeStorage {
             )
         }
         let modified = isModuleCache ? newestModificationDate(ofFolderAndChildren: url) : modificationDate(of: url)
+        let assessment = isModuleCache
+            ? StorageCategory.derivedData.ageAssessment(lastUsed: modified, now: now)
+            : (status: .active, explanation: "Shared across projects, and clearing it can slow the builds that use it.")
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
@@ -252,7 +258,8 @@ extension XcodeStorage {
             lastUsedDate: modified,
             path: url,
             workspacePath: nil,
-            status: isModuleCache ? StorageCategory.derivedData.ageStatus(lastUsed: modified, now: now) : .active,
+            status: assessment.status,
+            statusExplanation: assessment.explanation,
             deletionMethod: .trashFile(url),
             metadata: [
                 MetadataEntry(key: "Type", value: isModuleCache ? "Xcode Build Cache" : "DerivedData Folder"),
@@ -271,7 +278,7 @@ extension XcodeStorage {
         return ([url] + children).compactMap(modificationDate(of:)).max()
     }
 
-    private static func inspectArchive(at url: URL) throws(CancellationError) -> StorageItem {
+    private static func inspectArchive(at url: URL, now: Date) throws(CancellationError) -> StorageItem {
         let size = try DirectorySizer.allocatedSize(of: url)
         var displayName = url.deletingPathExtension().lastPathComponent
         var versionSubtitle = "Xcode Archive"
@@ -299,6 +306,7 @@ extension XcodeStorage {
             }
         }
 
+        let assessment = StorageCategory.archivesAndCaches.ageAssessment(lastUsed: creationDate, now: now)
         return StorageItem(
             id: "archive:\(url.path)",
             category: .archivesAndCaches,
@@ -308,7 +316,8 @@ extension XcodeStorage {
             lastUsedDate: creationDate,
             path: url,
             workspacePath: nil,
-            status: .active,
+            status: assessment.status,
+            statusExplanation: assessment.explanation,
             deletionMethod: .trashFile(url),
             metadata: metadata
         )
