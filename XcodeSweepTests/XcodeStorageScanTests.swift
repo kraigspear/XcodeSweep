@@ -774,4 +774,24 @@ struct XcodeStorageScanTests {
         #expect(snapshot.failures[.archivesAndCaches]?.contains("2026-09-01") == true)
         #expect(snapshot.itemsByCategory[.archivesAndCaches]?.map(\.name) == ["ReadableApp"])
     }
+
+    /// A folder listed but gone, or unreachable, by the time it is identified might be a
+    /// registered device's folder, so it must not be offered for Trash.
+    @Test("A preview folder that can't be identified after listing is left out")
+    func unidentifiablePreviewFolderIsLeftOut() throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let kept = fixture.rootURL.appendingPathComponent("Kept", isDirectory: true)
+        let vanished = fixture.rootURL.appendingPathComponent("Vanished", isDirectory: true)
+        try FileManager.default.createDirectory(at: kept, withIntermediateDirectories: true)
+        let keptIdentity = try #require(FileIdentity(of: kept))
+
+        let leftovers = XcodeStorage.leftoverPreviewFolders(
+            [kept, vanished],
+            registeredFolders: [],
+            identity: { $0 == vanished ? nil : keptIdentity }
+        )
+
+        #expect(leftovers == [kept])
+    }
 }
