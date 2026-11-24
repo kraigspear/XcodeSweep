@@ -251,7 +251,7 @@ struct CategoryCardView: View {
                 Spacer()
 
                 if metrics.reclaimableCount > 0 {
-                    Button("Review \(metrics.reclaimableCount) Cleanable") {
+                    Button("Review \(metrics.reclaimableCount) Recommended") {
                         onSelectReclaimable()
                     }
                     .buttonStyle(.bordered)

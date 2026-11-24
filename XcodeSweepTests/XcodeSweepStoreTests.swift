@@ -386,10 +386,10 @@ struct XcodeSweepStoreTests {
         #expect(store.selectedItemIDs == selection)
     }
 
-    /// Verifies "Review Cleanable" lands on the category with Recommended applied, no stale search, and reclaimable
+    /// Verifies "Review Recommended" lands on the category with Recommended applied, no stale search, and reclaimable
     /// items
     /// selected.
-    /// To replicate: in Simulator Devices type a search → go to Overview → click "Review N Cleanable" on DerivedData.
+    /// To replicate: in Simulator Devices type a search → go to Overview → click "Review N Recommended" on DerivedData.
     @Test("Opening a category for cleanup applies Recommended and selects reclaimable items")
     func openCategoryAndSelectReclaimable_fromAnotherCategory_appliesReclaimableFilterAndSelects() async throws {
         let (store, fixture) = try await makeScannedStore()

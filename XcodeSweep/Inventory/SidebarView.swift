@@ -75,7 +75,7 @@ struct SidebarCategoryRow: View {
                         ScanFailureBadge(failure: failure)
                     }
                     if metrics.reclaimableCount > 0 {
-                        Text("\(metrics.reclaimableCount) cleanable")
+                        Text("\(metrics.reclaimableCount) recommended")
                             .font(.caption2)
                             .foregroundStyle(.orange)
                     }

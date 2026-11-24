@@ -66,6 +66,28 @@ struct AppSceneTests {
         #expect(card.contains { $0.contains("Scan incomplete") }, "Recognized: \(card)")
     }
 
+    /// Verifies the Overview card and sidebar row name reclaimable items "Recommended", the word every other screen uses.
+    /// To replicate: scan a Mac with an unused DerivedData folder → read the DerivedData card's button and sidebar row.
+    @Test("The Overview card and sidebar row call reclaimable items Recommended")
+    func reclaimableCountIsLabelledRecommended() throws {
+        let metrics = CategoryMetrics(
+            category: .simulatorDevices, itemCount: 59, totalBytes: 276_910_000_000,
+            reclaimableCount: 30, reclaimableBytes: 2_000
+        )
+
+        // At the narrowest card the Overview grid allows and a row of the narrowest sidebar, so the
+        // longer word is read whole only if it isn't truncated.
+        let card = try recognizedText(in: CategoryCardView(
+            metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+        ).frame(width: 290))
+        let row = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: nil)
+            .frame(width: 190))
+
+        #expect(card.contains { $0.contains("Recommended") }, "Recognized: \(card)")
+        #expect(row.contains { $0.contains("recommended") }, "Recognized: \(row)")
+        #expect(!(card + row).contains { $0.localizedCaseInsensitiveContains("cleanable") }, "Recognized: \(card + row)")
+    }
+
     #if DEBUG && canImport(SwiftUI)
         /// A filter that hides every row must not hide why some rows may be missing.
         @Test("A filtered category view still explains a failed scan")
