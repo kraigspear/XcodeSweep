@@ -410,6 +410,156 @@ struct XcodeStorageScanTests {
         #expect(byName["Unmounted"]?.isReclaimable == false)
     }
 
+    /// Verifies each DerivedData row explains its badge with the fact that decided it.
+    /// To replicate: open DerivedData → select an Orphaned, a Worktree, and an Unused row → read the line under each badge.
+    @Test("Explains each DerivedData status with the fact that decided it")
+    func derivedDataStatusesAreExplained() async throws {
+        // Given: a folder whose project is gone, one with no recorded project, a worktree build, and an old build
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let worktreeProject = try fixture.createWorkspace(
+            folderName: "feature-branch",
+            projectName: "Linked.xcodeproj",
+            isGitWorktree: true
+        )
+        let oldProject = try fixture.createWorkspace(folderName: "old-repo", projectName: "Old.xcodeproj")
+        try fixture.addDerivedData(folderName: "Gone-1", workspacePath: "/nonexistent/Gone.xcodeproj", lastAccessed: now)
+        try fixture.addDerivedData(
+            folderName: "NoRecord-abcdefghijklmnopqrstuvwxyzab",
+            workspacePath: nil,
+            lastAccessed: now
+        )
+        try fixture.addDerivedData(folderName: "Linked-2", workspacePath: worktreeProject.path, lastAccessed: now)
+        try fixture.addDerivedData(
+            folderName: "Old-3",
+            workspacePath: oldProject.path,
+            lastAccessed: now.addingTimeInterval(-47 * 86400)
+        )
+
+        // When
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let byName = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.derivedData]).map { ($0.name, $0) }
+        )
+
+        // Then
+        #expect(byName["Gone"]?.statusExplanation == "Its project is no longer at /nonexistent/Gone.xcodeproj.")
+        #expect(
+            byName["NoRecord"]?.statusExplanation
+                == "Xcode recorded no project for this folder, so nothing is known to use it."
+        )
+        #expect(
+            byName["Linked"]?.statusExplanation
+                == "Built from a git worktree, which counts as in use whatever its age."
+        )
+        #expect(byName["Old"]?.statusExplanation == "Last used 47 days ago, past the 30-day limit for DerivedData.")
+    }
+
+    /// Verifies simulator rows explain Unavailable with simctl's own error, and Booted and System in plain words.
+    /// To replicate: delete a runtime that a simulator uses, boot another simulator → scan → hover each status badge.
+    @Test("Explains unavailable, booted, and system-managed simulators")
+    func simulatorStatusesAreExplained() async throws {
+        // Given: an unavailable device with an error, one without, a booted device, and a runtime simctl won't delete
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let devicesJSON = """
+        {
+          "devices": {
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-4": [
+              { "udid": "AAA", "isAvailable": true, "state": "Booted", "name": "Running" },
+              { "udid": "BBB", "isAvailable": false, "availabilityError": "runtime profile not found",
+                "state": "Shutdown", "name": "Broken" },
+              { "udid": "CCC", "isAvailable": false, "state": "Shutdown", "name": "Unexplained" }
+            ]
+          }
+        }
+        """
+        let runtimesJSON = """
+        {
+          "SYSTEM-RT": {
+            "build": "24C100", "deletable": false, "identifier": "SYSTEM-RT",
+            "platformIdentifier": "com.apple.platform.watchsimulator",
+            "sizeBytes": 3000000000, "state": "Ready", "version": "12.0"
+          }
+        }
+        """
+
+        // When
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(devicesJSON: devicesJSON, runtimesJSON: runtimesJSON),
+            fileTrasher: RecordingFileTrasher()
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let devices = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.simulatorDevices]).map { ($0.name, $0) }
+        )
+
+        // Then
+        #expect(devices["Running"]?.statusExplanation == "This simulator is running.")
+        #expect(
+            devices["Broken"]?.statusExplanation
+                == "Xcode reports this simulator as unavailable (runtime profile not found)."
+        )
+        #expect(devices["Unexplained"]?.statusExplanation == "Xcode reports this simulator as unavailable.")
+        #expect(
+            snapshot.itemsByCategory[.simulatorRuntimes]?.first?.statusExplanation
+                == "Managed by Xcode or macOS, so it can't be deleted."
+        )
+    }
+
+    /// Verifies Archives & Caches rows explain why the module cache ages while archives and other caches never do.
+    /// To replicate: open Archives & Caches → select ModuleCache.noindex, an archive, and another cache → read each line.
+    @Test("Explains the module cache by DerivedData's limit, and why archives and other caches aren't recommended")
+    func archivesAndCachesStatusesAreExplained() async throws {
+        // Given: a module cache unused for 35 days, another shared cache, and an old archive
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        try fixture.addModuleCache(modifiedDate: now.addingTimeInterval(-35 * 86400))
+        let symbolCache = fixture.xcodeRootURL.appendingPathComponent("DerivedData/SymbolCache.noindex", isDirectory: true)
+        try FileManager.default.createDirectory(at: symbolCache, withIntermediateDirectories: true)
+        try fixture.addArchive(
+            dateFolder: "2026-08-01",
+            archiveName: "ReleaseApp 8-1-26",
+            appName: "ReleaseApp",
+            shortVersion: "2.4.0",
+            buildVersion: "42",
+            bundleID: "com.example.releaseapp",
+            creationDate: now.addingTimeInterval(-400 * 86400)
+        )
+
+        // When
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let byName = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.archivesAndCaches]).map { ($0.name, $0) }
+        )
+
+        // Then
+        #expect(
+            byName["ModuleCache.noindex"]?.statusExplanation
+                == "Last used 35 days ago, past the 30-day limit for DerivedData."
+        )
+        #expect(
+            byName["SymbolCache.noindex"]?.statusExplanation
+                == "Shared across projects. Clearing it can slow the builds that use it."
+        )
+        #expect(byName["ReleaseApp"]?.statusExplanation == "Archives & Caches never count as unused by age.")
+    }
+
     /// To replicate: build any project, then open Archives & Caches; the module cache showed
     /// Unused beside a Last Used of minutes ago.
     @Test("Ages the module cache by DerivedData's threshold instead of always calling it unused")

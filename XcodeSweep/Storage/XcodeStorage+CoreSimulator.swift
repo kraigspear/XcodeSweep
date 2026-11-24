@@ -102,13 +102,14 @@ extension XcodeStorage {
             let lastUsedDate = record.lastUsedAt.flatMap(parseISO8601)
             let isDeletable = record.deletable ?? true
 
-            let status: ItemStatus = isDeletable
-                ? StorageCategory.simulatorRuntimes.ageStatus(lastUsed: lastUsedDate, now: now)
-                : .systemManaged
+            let protectionReason = "Managed by Xcode or macOS"
+            let assessment = isDeletable
+                ? StorageCategory.simulatorRuntimes.ageAssessment(lastUsed: lastUsedDate, now: now)
+                : (status: .systemManaged, explanation: "\(protectionReason), so it can't be deleted.")
 
             let method: DeletionMethod = isDeletable
                 ? .simctlRuntime(identifier: record.identifier)
-                : .notDeletable(reason: "Managed by Xcode or macOS")
+                : .notDeletable(reason: protectionReason)
 
             var metadata: [MetadataEntry] = [
                 MetadataEntry(key: "Identifier", value: record.identifier),
@@ -133,7 +134,8 @@ extension XcodeStorage {
                 lastUsedDate: lastUsedDate,
                 path: record.path.map { URL(fileURLWithPath: $0) },
                 workspacePath: nil,
-                status: status,
+                status: assessment.status,
+                statusExplanation: assessment.explanation,
                 deletionMethod: method,
                 metadata: metadata
             )
@@ -160,13 +162,14 @@ extension XcodeStorage {
                 let lastUsedDate = device.lastUsedAt.flatMap(parseISO8601)
                 let isBooted = device.state.caseInsensitiveCompare("Booted") == .orderedSame
 
-                let status: ItemStatus
+                let assessment: (status: ItemStatus, explanation: String)
                 if !device.isAvailable {
-                    status = .unavailable
+                    let simctlError = device.availabilityError.flatMap { $0.isEmpty ? nil : " (\($0))" } ?? ""
+                    assessment = (.unavailable, "Xcode reports this simulator as unavailable\(simctlError).")
                 } else if isBooted {
-                    status = .booted
+                    assessment = (.booted, "This simulator is running.")
                 } else {
-                    status = category.ageStatus(lastUsed: lastUsedDate, now: now)
+                    assessment = category.ageAssessment(lastUsed: lastUsedDate, now: now)
                 }
 
                 let deviceURL = device.dataPath.map {
@@ -209,7 +212,8 @@ extension XcodeStorage {
                         lastUsedDate: lastUsedDate,
                         path: deviceURL,
                         workspacePath: nil,
-                        status: status,
+                        status: assessment.status,
+                        statusExplanation: assessment.explanation,
                         deletionMethod: .simctlDevice(udid: device.udid, deviceSet: deviceSet),
                         metadata: metadata
                     )

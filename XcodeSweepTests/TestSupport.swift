@@ -564,6 +564,7 @@ func makeStorageItem(
         path: nil,
         workspacePath: workspacePath,
         status: status,
+        statusExplanation: "",
         deletionMethod: method,
         metadata: []
     )

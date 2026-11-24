@@ -112,6 +112,7 @@ struct XcodeLocationsTests {
             let item = try #require(everything.first { $0.path?.standardizedFileURL == folder.standardizedFileURL })
             #expect(!item.isDeletable)
             #expect(item.sizeBytes == 0)
+            #expect(item.statusExplanation == "Not recognized as Xcode's, so it's left alone and not counted.")
         }
         let xcodeBytes = everything.filter(\.isDeletable).reduce(0) { $0 + $1.sizeBytes }
         #expect(StorageInventory(snapshot: snapshot).totalBytes == xcodeBytes)

@@ -19,9 +19,37 @@ struct StorageCategoryTests {
     func ageStatus_atAndPastLimit_staysActiveThenStale(category: StorageCategory, days: Int) {
         let atLimit = now.addingTimeInterval(-TimeInterval(days) * 86400)
 
-        #expect(category.ageStatus(lastUsed: atLimit, now: now) == .active)
-        #expect(category.ageStatus(lastUsed: atLimit.addingTimeInterval(-1), now: now) == .stale)
-        #expect(category.ageStatus(lastUsed: nil, now: now) == .active)
+        #expect(category.ageAssessment(lastUsed: atLimit, now: now).status == .active)
+        #expect(category.ageAssessment(lastUsed: atLimit.addingTimeInterval(-1), now: now).status == .stale)
+        #expect(category.ageAssessment(lastUsed: nil, now: now).status == .active)
+    }
+
+    /// Verifies the reason shown for an Unused item gives the days since its last use and the limit it passed.
+    /// To replicate: select a simulator runtime last used 47 days ago → read the line under its badge in the inspector.
+    @Test("An unused item's explanation names the days since use and the category's limit")
+    func ageAssessment_pastLimit_explainsDaysAndLimit() {
+        let assessment = StorageCategory.simulatorRuntimes.ageAssessment(
+            lastUsed: now.addingTimeInterval(-47 * 86400),
+            now: now
+        )
+
+        #expect(assessment.explanation == "Last used 47 days ago, past the 45-day limit for Simulator Runtimes.")
+    }
+
+    /// Verifies an Active item's reason says which limit it is within, or that its last use isn't known.
+    /// To replicate: select a DerivedData folder built today, then one with no Last Used date → read the inspector line.
+    @Test("An active item's explanation names the limit it is within, or says last use is unknown")
+    func ageAssessment_withinLimitOrUnknown_explainsWhyActive() {
+        let category = StorageCategory.derivedData
+
+        #expect(
+            category.ageAssessment(lastUsed: now.addingTimeInterval(-86400), now: now).explanation
+                == "Used within the 30-day limit for DerivedData."
+        )
+        #expect(
+            category.ageAssessment(lastUsed: nil, now: now).explanation
+                == "Last use is unknown, so it isn't counted as unused."
+        )
     }
 
     /// Verifies the Archives & Caches age rule never makes an item Unused; a years-old archive stays
@@ -29,7 +57,10 @@ struct StorageCategoryTests {
     /// To replicate: keep an .xcarchive from years ago → open Archives & Caches → it shows Active.
     @Test("Archives & Caches' own age rule never makes an item stale")
     func ageStatus_archivesAndCaches_neverStale() {
-        #expect(StorageCategory.archivesAndCaches.ageStatus(lastUsed: .distantPast, now: now) == .active)
+        let assessment = StorageCategory.archivesAndCaches.ageAssessment(lastUsed: .distantPast, now: now)
+
+        #expect(assessment.status == .active)
+        #expect(assessment.explanation == "Archives & Caches never count as unused by age.")
     }
 
     /// Verifies each category offers a filter for exactly the filterable statuses its scan can assign.
