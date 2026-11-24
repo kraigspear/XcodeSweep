@@ -49,7 +49,7 @@ struct XcodeStorageScanTests {
             workspacePath: activeProject.path,
             lastAccessed: tenDaysAgo
         )
-        try fixture.addModuleCache()
+        try fixture.addModuleCache(modifiedDate: thirtyFiveDaysAgo)
 
         // 2. DeviceSupport (45d threshold)
         try fixture.addDeviceSupport(
@@ -71,7 +71,7 @@ struct XcodeStorageScanTests {
             modifiedDate: sixtyDaysAgo
         )
 
-        // 4. Archives (always .active regardless of age) + ModuleCache (always .stale)
+        // 4. Archives (always .active regardless of age) + ModuleCache (DerivedData's 30d threshold)
         try fixture.addArchive(
             dateFolder: "2026-08-01",
             archiveName: "ReleaseApp 8-1-26",
@@ -241,7 +241,7 @@ struct XcodeStorageScanTests {
         #expect(previews.first?.subtitle == "iOS 27.2 • PREVIEW-OLD")
         #expect(previews.first?.status == .stale)
 
-        // Archives & Caches: ModuleCache (.stale) + Archive (.active even at 60d old)
+        // Archives & Caches: ModuleCache (.stale at 35d) + Archive (.active even at 60d old)
         let archivesAndCaches = try #require(snapshot.itemsByCategory[.archivesAndCaches])
         #expect(archivesAndCaches.count == 2)
         let extrasByName = Dictionary(uniqueKeysWithValues: archivesAndCaches.map { ($0.name, $0) })
@@ -410,6 +410,67 @@ struct XcodeStorageScanTests {
         #expect(byName["Unmounted"]?.isReclaimable == false)
     }
 
+    /// To replicate: build any project, then open Archives & Caches; the module cache showed
+    /// Unused beside a Last Used of minutes ago.
+    @Test("Ages the module cache by DerivedData's threshold instead of always calling it unused")
+    func recentlyUsedModuleCacheIsActive() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        try fixture.addModuleCache(modifiedDate: now.addingTimeInterval(-29 * 86400))
+
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let moduleCache = try #require(
+            snapshot.itemsByCategory[.archivesAndCaches]?.first { $0.name == "ModuleCache.noindex" }
+        )
+
+        #expect(moduleCache.status == .active)
+        #expect(moduleCache.isReclaimable == false)
+    }
+
+    @Test("Counts a module written into a cache subfolder as use, though the cache folder's own date is old")
+    func moduleCacheUsedThroughSubfolderIsActive() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+
+        // Given: a build wrote a module into an existing hash folder an hour ago,
+        // which leaves the cache folder's own date 35 days old
+        let cacheURL = try fixture.addModuleCache(modifiedDate: now.addingTimeInterval(-35 * 86400))
+        let hashFolder = cacheURL.appendingPathComponent("1046HBEBLAASD", isDirectory: true)
+        try FileManager.default.createDirectory(at: hashFolder, withIntermediateDirectories: true)
+        try Data(repeating: 0xBB, count: 4096).write(to: hashFolder.appendingPathComponent("Foundation-3S5Y.pcm"))
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-3600)], ofItemAtPath: hashFolder.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: now.addingTimeInterval(-35 * 86400)], ofItemAtPath: cacheURL.path
+        )
+
+        // When
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        // Then
+        let moduleCache = try #require(
+            snapshot.itemsByCategory[.archivesAndCaches]?.first { $0.name == "ModuleCache.noindex" }
+        )
+        #expect(moduleCache.status == .active)
+        #expect(moduleCache.isReclaimable == false)
+        #expect(moduleCache.lastUsedDate == now.addingTimeInterval(-3600))
+    }
+
     /// To replicate: build one project in Xcode and with `xcodebuild -derivedDataPath`; two rows
     /// showed the same name and workspace with nothing to tell them apart.
     @Test("Names the folder only on DerivedData rows that share a workspace")
@@ -474,7 +535,7 @@ struct XcodeStorageScanTests {
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             try Data(repeating: 0xCC, count: 4096).write(to: url.appendingPathComponent("cache.bin"))
         }
-        try fixture.addModuleCache()
+        try fixture.addModuleCache(modifiedDate: now.addingTimeInterval(-35 * 86400))
         let lostPlist = derivedData.appendingPathComponent("LostPlist-abcdefghijklmnopqrstuvwxyzab", isDirectory: true)
         try FileManager.default.createDirectory(at: lostPlist, withIntermediateDirectories: true)
         try fixture.addDerivedData(

@@ -24,9 +24,10 @@ struct StorageCategoryTests {
         #expect(category.ageStatus(lastUsed: nil, now: now) == .active)
     }
 
-    /// Verifies Archives & Caches never ages into Unused; a years-old archive stays Active.
+    /// Verifies the Archives & Caches age rule never makes an item Unused; a years-old archive stays
+    /// Active. The module cache is the exception: it ages by DerivedData's rule.
     /// To replicate: keep an .xcarchive from years ago → open Archives & Caches → it shows Active.
-    @Test("Archives & Caches never ages into stale")
+    @Test("Archives & Caches' own age rule never makes an item stale")
     func ageStatus_archivesAndCaches_neverStale() {
         #expect(StorageCategory.archivesAndCaches.ageStatus(lastUsed: .distantPast, now: now) == .active)
     }

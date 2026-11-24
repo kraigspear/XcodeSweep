@@ -50,6 +50,7 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
     // MARK: - Status Rules
 
     /// Days without use after which an item counts as unused; `nil` when age never makes an item unused.
+    /// Archives & Caches is `nil`, but its module cache ages by DerivedData's threshold.
     var staleAfterDays: Int? {
         switch self {
         case .derivedData, .simulatorDevices:

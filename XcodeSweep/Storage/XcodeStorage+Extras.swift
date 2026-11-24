@@ -150,7 +150,8 @@ extension XcodeStorage {
 
     /// `failure` names each archives folder that couldn't be read.
     func scanArchivesAndCaches(
-        sharedCaches: [URL]
+        sharedCaches: [URL],
+        now: Date
     ) async throws(CancellationError) -> (items: [StorageItem], failure: String?) {
         var items: [StorageItem] = []
         var failures: [String] = []
@@ -160,7 +161,7 @@ extension XcodeStorage {
         let isCustom = xcodeLocations.hasCustomDerivedData
         for cacheURL in sharedCaches {
             try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
-                try Self.inspectSharedCache(at: cacheURL, inCustomFolder: isCustom)
+                try Self.inspectSharedCache(at: cacheURL, inCustomFolder: isCustom, now: now)
             })
         }
 
@@ -209,11 +210,16 @@ extension XcodeStorage {
     /// Caches Xcode is known to create in DerivedData; in a custom folder, only these may be removed.
     private static let knownSharedCacheNames: Set<String> = [moduleCacheFolderName, "SDKExplicitPrecompiledModules"]
 
-    /// The module cache keeps its long-standing Unused status. Other folders aren't recommended:
-    /// most are build caches, and clearing one can slow the builds that use it. In a custom
-    /// DerivedData folder an unknown one may not be Xcode's at all, so it is protected, and left
-    /// unmeasured so it can't count as Xcode storage.
-    private static func inspectSharedCache(at url: URL, inCustomFolder: Bool) throws(CancellationError) -> StorageItem {
+    /// The module cache ages like a DerivedData project folder, since the same builds use it: clearing
+    /// one still in use only makes it grow back while slowing every project's next build. Other
+    /// folders aren't recommended: most are build caches, and clearing one can slow the builds that
+    /// use it. In a custom DerivedData folder an unknown one may not be Xcode's at all, so it is
+    /// protected, and left unmeasured so it can't count as Xcode storage.
+    private static func inspectSharedCache(
+        at url: URL,
+        inCustomFolder: Bool,
+        now: Date
+    ) throws(CancellationError) -> StorageItem {
         let isModuleCache = url.lastPathComponent == moduleCacheFolderName
         let isTrusted = !inCustomFolder || knownSharedCacheNames.contains(url.lastPathComponent)
         guard isTrusted else {
@@ -234,6 +240,7 @@ extension XcodeStorage {
                 ]
             )
         }
+        let modified = isModuleCache ? newestModificationDate(ofFolderAndChildren: url) : modificationDate(of: url)
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
@@ -242,16 +249,26 @@ extension XcodeStorage {
                 ? "Shared Swift/Clang module cache (safely regenerated on next build)"
                 : "Shared DerivedData folder, not tied to one project",
             sizeBytes: DirectorySizer.allocatedSize(of: url),
-            lastUsedDate: modificationDate(of: url),
+            lastUsedDate: modified,
             path: url,
             workspacePath: nil,
-            status: isModuleCache ? .stale : .active,
+            status: isModuleCache ? StorageCategory.derivedData.ageStatus(lastUsed: modified, now: now) : .active,
             deletionMethod: .trashFile(url),
             metadata: [
                 MetadataEntry(key: "Type", value: isModuleCache ? "Xcode Build Cache" : "DerivedData Folder"),
                 MetadataEntry(key: "Path", value: url.path),
             ]
         )
+    }
+
+    /// The newest date of `url` and its direct children. A build writes modules into the cache's
+    /// hash subfolders, which leaves the cache folder's own date unchanged.
+    private static func newestModificationDate(ofFolderAndChildren url: URL) -> Date? {
+        let children = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []
+        return ([url] + children).compactMap(modificationDate(of:)).max()
     }
 
     private static func inspectArchive(at url: URL) throws(CancellationError) -> StorageItem {
