@@ -159,8 +159,13 @@ struct AppSceneTests {
     }
 
     private func recognizedText(in view: some View) throws -> [String] {
-        // Opaque, since recognition finds nothing on a transparent render.
-        let renderer = ImageRenderer(content: view.background(.white).environment(\.colorScheme, .light))
+        // Opaque, since recognition finds nothing on a transparent render. The locale is pinned because
+        // sizes are formatted for it, and a longer size changes what fits beside it.
+        let renderer = ImageRenderer(
+            content: view.background(.white)
+                .environment(\.colorScheme, .light)
+                .environment(\.locale, Locale(identifier: "en_US"))
+        )
         renderer.scale = 3
         let image = try #require(renderer.cgImage)
         let request = VNRecognizeTextRequest()
