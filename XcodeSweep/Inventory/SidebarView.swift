@@ -59,27 +59,31 @@ struct SidebarCategoryRow: View {
     let failure: String?
 
     var body: some View {
-        HStack(spacing: 8) {
-            Label(metrics.category.title, systemImage: metrics.category.systemImage)
-                .lineLimit(1)
-            Spacer(minLength: 4)
-            if isScanning {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                VStack(alignment: .trailing, spacing: 1) {
-                    Text(metrics.totalBytes, format: .byteCount(style: .file))
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(metrics.totalBytes > 0 ? .primary : .secondary)
-                    if let failure {
-                        ScanFailureBadge(failure: failure)
-                    }
-                    if metrics.reclaimableCount > 0 {
-                        Text("\(metrics.reclaimableCount) recommended")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
+        // The caption gets the row's full width below the title; beside it, a caption wider than the
+        // size would truncate the title.
+        VStack(alignment: .trailing, spacing: 1) {
+            HStack(spacing: 8) {
+                Label(metrics.category.title, systemImage: metrics.category.systemImage)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if isScanning {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(metrics.totalBytes, format: .byteCount(style: .file))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(metrics.totalBytes > 0 ? .primary : .secondary)
+                        if let failure {
+                            ScanFailureBadge(failure: failure)
+                        }
                     }
                 }
+            }
+            if !isScanning, metrics.reclaimableCount > 0 {
+                Text("\(metrics.reclaimableCount) recommended")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
             }
         }
     }
