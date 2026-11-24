@@ -453,11 +453,11 @@ struct XcodeStorageScanTests {
         #expect(byName["Gone"]?.statusExplanation == "Its project is no longer at /nonexistent/Gone.xcodeproj.")
         #expect(
             byName["NoRecord"]?.statusExplanation
-                == "Xcode recorded no project for this folder, so nothing is known to use it."
+                == "This folder has no readable record of its project, so nothing is known to use it."
         )
         #expect(
             byName["Linked"]?.statusExplanation
-                == "Built from a git worktree, which counts as in use whatever its age."
+                == "Its project path looks like a git worktree, which counts as in use whatever its age."
         )
         #expect(byName["Old"]?.statusExplanation == "Last used 47 days ago, past the 30-day limit for DerivedData.")
     }
@@ -555,9 +555,9 @@ struct XcodeStorageScanTests {
         )
         #expect(
             byName["SymbolCache.noindex"]?.statusExplanation
-                == "Shared across projects. Clearing it can slow the builds that use it."
+                == "Shared across projects, and clearing it can slow the builds that use it."
         )
-        #expect(byName["ReleaseApp"]?.statusExplanation == "Archives & Caches never count as unused by age.")
+        #expect(byName["ReleaseApp"]?.statusExplanation == "Never counts as unused, whatever its age.")
     }
 
     /// To replicate: build any project, then open Archives & Caches; the module cache showed

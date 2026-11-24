@@ -16,7 +16,7 @@ struct StorageCategoryTests {
         (.deviceSupport, 45),
         (.previews, 45),
     ])
-    func ageStatus_atAndPastLimit_staysActiveThenStale(category: StorageCategory, days: Int) {
+    func ageAssessment_atAndPastLimit_staysActiveThenStale(category: StorageCategory, days: Int) {
         let atLimit = now.addingTimeInterval(-TimeInterval(days) * 86400)
 
         #expect(category.ageAssessment(lastUsed: atLimit, now: now).status == .active)
@@ -56,11 +56,11 @@ struct StorageCategoryTests {
     /// Active. The module cache is the exception: it ages by DerivedData's rule.
     /// To replicate: keep an .xcarchive from years ago → open Archives & Caches → it shows Active.
     @Test("Archives & Caches' own age rule never makes an item stale")
-    func ageStatus_archivesAndCaches_neverStale() {
+    func ageAssessment_archivesAndCaches_neverStale() {
         let assessment = StorageCategory.archivesAndCaches.ageAssessment(lastUsed: .distantPast, now: now)
 
         #expect(assessment.status == .active)
-        #expect(assessment.explanation == "Archives & Caches never count as unused by age.")
+        #expect(assessment.explanation == "Never counts as unused, whatever its age.")
     }
 
     /// Verifies each category offers a filter for exactly the filterable statuses its scan can assign.

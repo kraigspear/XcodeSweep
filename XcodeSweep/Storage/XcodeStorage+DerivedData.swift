@@ -126,14 +126,14 @@ extension XcodeStorage {
         fileManager: FileManager
     ) -> (status: ItemStatus, explanation: String) {
         guard let workspacePath, !workspacePath.isEmpty else {
-            return (.orphaned, "Xcode recorded no project for this folder, so nothing is known to use it.")
+            return (.orphaned, "This folder has no readable record of its project, so nothing is known to use it.")
         }
         guard presence != .missing else {
             return (.orphaned, "Its project is no longer at \(abbreviatingHome(in: workspacePath)).")
         }
 
         if isWorktreePath(workspacePath, fileManager: fileManager) {
-            return (.worktree, "Built from a git worktree, which counts as in use whatever its age.")
+            return (.worktree, "Its project path looks like a git worktree, which counts as in use whatever its age.")
         }
 
         return StorageCategory.derivedData.ageAssessment(lastUsed: lastAccessed, now: now)

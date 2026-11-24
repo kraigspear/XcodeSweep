@@ -82,7 +82,7 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
     /// The explanation comes with the status so the two can't disagree.
     func ageAssessment(lastUsed: Date?, now: Date) -> (status: ItemStatus, explanation: String) {
         guard let staleAfterDays else {
-            return (.active, "\(title) never count as unused by age.")
+            return (.active, "Never counts as unused, whatever its age.")
         }
         guard let lastUsed else {
             return (.active, "Last use is unknown, so it isn't counted as unused.")

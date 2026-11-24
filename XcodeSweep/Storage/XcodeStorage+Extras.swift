@@ -246,7 +246,7 @@ extension XcodeStorage {
         let modified = isModuleCache ? newestModificationDate(ofFolderAndChildren: url) : modificationDate(of: url)
         let assessment = isModuleCache
             ? StorageCategory.derivedData.ageAssessment(lastUsed: modified, now: now)
-            : (status: .active, explanation: "Shared across projects. Clearing it can slow the builds that use it.")
+            : (status: .active, explanation: "Shared across projects, and clearing it can slow the builds that use it.")
         return try StorageItem(
             id: isModuleCache ? "cache:moduleCache" : "sharedCache:\(url.lastPathComponent)",
             category: .archivesAndCaches,
