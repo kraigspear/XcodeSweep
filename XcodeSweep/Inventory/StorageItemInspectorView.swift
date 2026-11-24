@@ -56,7 +56,6 @@ private struct SingleItemInspectorContent: View {
 
                 Text(item.isReclaimable ? "Recommended: \(item.statusExplanation)" : item.statusExplanation)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
 
