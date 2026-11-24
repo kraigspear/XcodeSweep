@@ -4,8 +4,24 @@ extension XcodeStorage {
     static let moduleCacheFolderName = "ModuleCache.noindex"
 
     func scanDerivedData(_ projectFolders: [URL], now: Date) async -> [StorageItem] {
-        await Self.scanConcurrently(projectFolders, limiter: folderWalkLimiter) { folderURL in
+        let items = await Self.scanConcurrently(projectFolders, limiter: folderWalkLimiter) { folderURL in
             try Self.inspectDerivedDataFolder(at: folderURL, now: now)
+        }
+        return Self.namingFoldersOfSharedWorkspaces(items)
+    }
+
+    /// Rows built from the same workspace, such as Xcode's folder and an `xcodebuild -derivedDataPath`
+    /// one, otherwise look identical, so their subtitles name the folder.
+    private static func namingFoldersOfSharedWorkspaces(_ items: [StorageItem]) -> [StorageItem] {
+        let countsByWorkspace = Dictionary(items.compactMap { $0.workspacePath.map { ($0, 1) } }, uniquingKeysWith: +)
+        return items.map { item in
+            guard let workspacePath = item.workspacePath,
+                  countsByWorkspace[workspacePath, default: 0] > 1,
+                  let folderName = item.path?.lastPathComponent
+            else { return item }
+            var named = item
+            named.subtitle += " — \(folderName)"
+            return named
         }
     }
 

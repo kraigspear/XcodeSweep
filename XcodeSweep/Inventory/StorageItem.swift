@@ -105,7 +105,7 @@ struct StorageItem: Identifiable, Equatable, Hashable, Sendable {
     let category: StorageCategory
     let name: String
     /// Secondary line under the name, such as the runtime and state or the workspace location.
-    let subtitle: String
+    var subtitle: String
     let sizeBytes: Int64
     let lastUsedDate: Date?
     let path: URL?
