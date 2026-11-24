@@ -91,7 +91,7 @@ struct AppSceneTests {
 
     /// Verifies the "N recommended" caption takes no room from the row's title: it once sat beside the title,
     /// so the longer word truncated titles that fit before.
-    /// To replicate: scan a Mac with an unavailable simulator runtime → read its sidebar row at the default width.
+    /// To replicate: scan a Mac with an unused simulator runtime → read its sidebar row at the default width.
     @Test("A sidebar row's recommended caption leaves its title the same room")
     func recommendedCaptionLeavesTitleItsRoom() throws {
         let width: CGFloat = 240
