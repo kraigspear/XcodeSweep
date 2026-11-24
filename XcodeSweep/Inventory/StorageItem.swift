@@ -56,7 +56,7 @@ enum ItemStatus: String, CaseIterable, Equatable, Hashable, Sendable {
     case unavailable
     /// A simulator device that was running at scan time.
     case booted
-    /// Last used more than the category's `staleAfterDays` ago, or always for the module cache; shown as "Unused".
+    /// Last used more than the category's `staleAfterDays` ago (DerivedData's, for the module cache); shown as "Unused".
     case stale
     /// A simulator runtime that Xcode or macOS manages and `simctl` won't delete.
     case systemManaged

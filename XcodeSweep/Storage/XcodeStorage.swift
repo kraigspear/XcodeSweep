@@ -354,7 +354,10 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
 
                     group.addTask {
                         guard !Task.isCancelled,
-                              let archives = try? await storage.scanArchivesAndCaches(sharedCaches: derivedData.sharedCaches),
+                              let archives = try? await storage.scanArchivesAndCaches(
+                                  sharedCaches: derivedData.sharedCaches,
+                                  now: referenceDate
+                              ),
                               !Task.isCancelled
                         else { return nil }
                         return (.archivesAndCaches, archives.items, archives.failure)

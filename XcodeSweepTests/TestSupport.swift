@@ -82,7 +82,7 @@ struct TempXcodeFixture {
     }
 
     @discardableResult
-    func addModuleCache(payloadBytes: Int = 4096) throws -> URL {
+    func addModuleCache(modifiedDate: Date, payloadBytes: Int = 4096) throws -> URL {
         let cacheURL = xcodeRootURL
             .appendingPathComponent("DerivedData/ModuleCache.noindex", isDirectory: true)
         try FileManager.default.createDirectory(at: cacheURL, withIntermediateDirectories: true)
@@ -90,6 +90,7 @@ struct TempXcodeFixture {
             try Data(repeating: 0xBB, count: payloadBytes)
                 .write(to: cacheURL.appendingPathComponent("module.pcm"))
         }
+        try FileManager.default.setAttributes([.modificationDate: modifiedDate], ofItemAtPath: cacheURL.path)
         return cacheURL
     }
 
