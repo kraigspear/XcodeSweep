@@ -410,6 +410,36 @@ struct XcodeStorageScanTests {
         #expect(byName["Unmounted"]?.isReclaimable == false)
     }
 
+    /// To replicate: build one project in Xcode and with `xcodebuild -derivedDataPath`; two rows
+    /// showed the same name and workspace with nothing to tell them apart.
+    @Test("Names the folder only on DerivedData rows that share a workspace")
+    func sharedWorkspaceRowsShowFolderName() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        let sharedProject = try fixture.createWorkspace(folderName: "shared-repo", projectName: "Shared.xcodeproj")
+        let soloProject = try fixture.createWorkspace(folderName: "solo-repo", projectName: "Solo.xcodeproj")
+        try fixture.addDerivedData(folderName: "Shared-hash1", workspacePath: sharedProject.path, lastAccessed: now)
+        try fixture.addDerivedData(folderName: "SharedCustom-kli453", workspacePath: sharedProject.path, lastAccessed: now)
+        try fixture.addDerivedData(folderName: "Solo-hash2", workspacePath: soloProject.path, lastAccessed: now)
+
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let snapshot = try await finalScanSnapshot(from: storage)
+        let byFolder = Dictionary(
+            uniqueKeysWithValues: try #require(snapshot.itemsByCategory[.derivedData])
+                .map { ($0.path?.lastPathComponent ?? "", $0) }
+        )
+
+        #expect(byFolder["Shared-hash1"]?.subtitle.hasSuffix(" — Shared-hash1") == true)
+        #expect(byFolder["SharedCustom-kli453"]?.subtitle.hasSuffix(" — SharedCustom-kli453") == true)
+        #expect(byFolder["Solo-hash2"]?.subtitle.contains("Solo-hash2") == false)
+    }
+
     /// The footer once hard-coded "Macintosh HD"; the system VM volume is named "VM", so a hard-coded name fails here.
     @Test("Snapshot names the volume holding the Xcode folder")
     func scanReadsNameOfVolumeHoldingXcodeFolder() async throws {
