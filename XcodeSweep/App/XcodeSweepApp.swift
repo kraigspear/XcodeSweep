@@ -23,12 +23,17 @@ private struct TestHostApp: App {
 }
 
 struct XcodeSweepApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var xcodeSweepStore = XcodeSweepStore()
 
     var body: some Scene {
         // One window: the store holds selection, search, and dialog state that a second window would share.
         Window("XcodeSweep", id: "main") {
             ContentView(store: xcodeSweepStore)
+                // Closing the only window quits the app; while a cleanup runs, quitting goes
+                // through the confirmation in `AppDelegate` instead.
+                .windowDismissBehavior(xcodeSweepStore.operation.isDeleting ? .disabled : .automatic)
+                .onAppear { appDelegate.xcodeSweepStore = xcodeSweepStore }
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
@@ -61,5 +66,39 @@ struct XcodeSweepApp: App {
                 .keyboardShortcut("i", modifiers: [.command, .option])
             }
         }
+    }
+}
+
+/// Asks before quitting during a cleanup, and stops it cleanly if the user agrees.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var xcodeSweepStore: XcodeSweepStore?
+    /// Asks whether to stop the cleanup and quit. Tests answer instead of an alert.
+    var confirmStopAndQuit: @MainActor () -> Bool = AppDelegate.askToStopAndQuit
+    /// Tells AppKit whether to quit, after `.terminateLater`. Tests record the answer instead.
+    var replyToTermination: @MainActor (Bool) -> Void = { NSApplication.shared.reply(toApplicationShouldTerminate: $0) }
+
+    func applicationShouldTerminate(_: NSApplication) -> NSApplication.TerminateReply {
+        // A scan only reads, so quitting during one needs no question.
+        guard let xcodeSweepStore, xcodeSweepStore.operation.isDeleting else { return .terminateNow }
+        guard confirmStopAndQuit() else { return .terminateCancel }
+
+        // Cancelled now, before returning, so no further item starts while teardown runs.
+        let teardown = xcodeSweepStore.stopForTermination()
+        let reply = replyToTermination
+        Task {
+            await teardown?.value
+            reply(true)
+        }
+        return .terminateLater
+    }
+
+    private static func askToStopAndQuit() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "A cleanup is still running"
+        alert.informativeText = "Stop it and quit? The item being removed now is finished or stopped, and nothing after it is removed."
+        alert.addButton(withTitle: "Stop and Quit")
+        alert.addButton(withTitle: "Keep Running")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
