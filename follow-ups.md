@@ -2,20 +2,6 @@
 
 Non-blocking findings recorded during review. None of these block the change that surfaced them.
 
-## FU-001 — Unused explanation reads oddly on the first day past the limit
-
-- **Severity**: FOLLOW-UP
-- **Target**: PR #47 (`explain-item-status`), head `28857ee`, snapshot tree `f8db940`
-- **Source**: `XcodeSweep/Inventory/StorageCategory.swift:95`
-- **Issue**: Elapsed days are truncated, so an item 30 days and one second past its last use reads
-  "Last used 30 days ago, past the 30-day limit for DerivedData." The status is correct; the
-  sentence looks self-contradictory for one day.
-- **Next action**: For that interval say "Last used more than 30 days ago", and assert the sentence
-  in the existing boundary test.
-- **Why it does not block**: The status and recommendation are right, and the wording is merely
-  awkward for a 24-hour window.
-- **Raised by**: Codex (gpt-6.2-astra), finding AGE-1.
-
 ## FU-002 — Tooltips and the "Recommended:" prefix are verified from source only
 
 - **Severity**: FOLLOW-UP
