@@ -89,6 +89,50 @@ struct AppSceneTests {
         #expect(!(card + row).contains { $0.localizedCaseInsensitiveContains("cleanable") }, "Recognized: \(card + row)")
     }
 
+    /// Verifies a card's review button shows its whole label at the grid's narrowest card, even with a
+    /// three-digit count; "Review 130 Recommended" once truncated there.
+    /// To replicate: scan a Mac with 100+ unused DerivedData folders → narrow the window until the cards are
+    /// one column at their minimum width → read the DerivedData card's buttons.
+    @Test("A card's review button isn't truncated at the narrowest card width", arguments: [
+        (159, 130),
+        (1059, 999),
+    ])
+    func reviewButtonFitsNarrowestCard(itemCount: Int, reclaimableCount: Int) throws {
+        let metrics = CategoryMetrics(
+            category: .derivedData, itemCount: itemCount, totalBytes: 276_910_000_000,
+            reclaimableCount: reclaimableCount, reclaimableBytes: 2_000
+        )
+
+        let card = try recognizedText(in: CategoryCardView(
+            metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+        ).frame(width: 290))
+
+        #expect(card.contains("Review \(reclaimableCount) Recommended"), "Recognized: \(card)")
+        #expect(card.contains("Open"), "Recognized: \(card)")
+    }
+
+    /// Verifies a footer that fits on one row stays there: the narrowest card fits "Review 30 Recommended"
+    /// beside its item count with almost nothing to spare, so it is the first to drop a row by mistake.
+    /// To replicate: scan a Mac with a few unused DerivedData folders → narrow the window to one column of cards.
+    @Test("A card's footer keeps one row while its controls fit")
+    func footerStaysOneRowWhenItFits() throws {
+        func height(reclaimableCount: Int) throws -> Int {
+            let metrics = CategoryMetrics(
+                category: .derivedData, itemCount: 59, totalBytes: 276_910_000_000,
+                reclaimableCount: reclaimableCount, reclaimableBytes: 2_000
+            )
+            // The locale is pinned because the labels' widths, and so whether the row fits, depend on it.
+            let renderer = ImageRenderer(content: CategoryCardView(
+                metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+            )
+            .frame(width: 290)
+            .environment(\.locale, Locale(identifier: "en_US")))
+            return try #require(renderer.cgImage).height
+        }
+
+        #expect(try height(reclaimableCount: 30) == height(reclaimableCount: 0))
+    }
+
     /// Verifies the "N recommended" caption takes no room from the row's title: it once sat beside the title,
     /// so the longer word truncated titles that fit before.
     /// To replicate: scan a Mac with an unused simulator runtime → read its sidebar row at the default width.

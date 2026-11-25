@@ -243,31 +243,48 @@ struct CategoryCardView: View {
 
             Spacer(minLength: 4)
 
-            HStack {
-                Text("\(metrics.itemCount) \(metrics.itemCount == 1 ? "item" : "items")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                if metrics.reclaimableCount > 0 {
-                    Button("Review \(metrics.reclaimableCount) Recommended") {
-                        onSelectReclaimable()
+            // A three-digit recommended count can outgrow one row at the grid's narrowest card.
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    itemCountLabel
+                    Spacer(minLength: 0)
+                    footerButtons
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    itemCountLabel
+                    HStack {
+                        Spacer()
+                        footerButtons
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
-
-                Button("Open") {
-                    onOpen()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, minHeight: 136, alignment: .topLeading)
         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var itemCountLabel: some View {
+        Text("\(metrics.itemCount) \(metrics.itemCount == 1 ? "item" : "items")")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var footerButtons: some View {
+        if metrics.reclaimableCount > 0 {
+            Button("Review \(metrics.reclaimableCount) Recommended") {
+                onSelectReclaimable()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+
+        Button("Open") {
+            onOpen()
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
     }
 }
 

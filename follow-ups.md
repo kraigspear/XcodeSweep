@@ -17,18 +17,3 @@ Non-blocking findings recorded during review. None of these block the change tha
 - **Why it does not block**: Each is a one-line standard SwiftUI modifier or string prefix over
   tested model text, and nothing depends on it.
 - **Raised by**: Codex (gpt-6.2-astra), finding UI-1.
-
-## FU-003 — "Review N Recommended" truncates on the narrowest card with 100 or more recommended
-
-- **Severity**: FOLLOW-UP
-- **Target**: PR #48 (`rename-cleanable-to-recommended`), head `edd5334`, snapshot tree `eaa9ed4`
-- **Source**: `XcodeSweep/Inventory/OverviewView.swift:246`
-- **Issue**: At the Overview grid's 290-point minimum card width, 159 items with 130 recommended
-  renders "Review 130 Recommend…". With 1,059 items and 999 recommended the button stays truncated
-  at 300 points and is whole at 320. "Review N Cleanable" fit in each case.
-- **Next action**: Let the card's footer reflow when its controls don't fit, and cover 159 items
-  with 130 recommended at 290 points in `AppSceneTests`.
-- **Why it does not block**: It needs 100 or more recommended items in one category and a card
-  within 10 to 30 points of its minimum width, and the truncated label still shows the count and
-  "Recommend…".
-- **Raised by**: The coordinator's layout probe; graded by Codex (gpt-6.2-astra), finding UI-1.
