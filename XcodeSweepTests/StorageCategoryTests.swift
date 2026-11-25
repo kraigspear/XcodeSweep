@@ -20,7 +20,12 @@ struct StorageCategoryTests {
         let atLimit = now.addingTimeInterval(-TimeInterval(days) * 86400)
 
         #expect(category.ageAssessment(lastUsed: atLimit, now: now).status == .active)
-        #expect(category.ageAssessment(lastUsed: atLimit.addingTimeInterval(-1), now: now).status == .stale)
+        let justPast = category.ageAssessment(lastUsed: atLimit.addingTimeInterval(-1), now: now)
+        #expect(justPast.status == .stale)
+        #expect(
+            justPast.explanation
+                == "Last used more than \(days) days ago, past the \(days)-day limit for \(category.title)."
+        )
         #expect(category.ageAssessment(lastUsed: nil, now: now).status == .active)
     }
 

@@ -93,7 +93,9 @@ enum StorageCategory: String, CaseIterable, Identifiable, Hashable, Sendable {
             return (.active, "Used within the \(staleAfterDays)-day limit for \(title).")
         }
         let daysSinceUse = Int(age / secondsPerDay)
-        return (.stale, "Last used \(daysSinceUse) days ago, past the \(staleAfterDays)-day limit for \(title).")
+        // Truncation reads "N days ago" for the first day past an N-day limit, which sounds within it.
+        let elapsed = daysSinceUse == staleAfterDays ? "more than \(daysSinceUse)" : "\(daysSinceUse)"
+        return (.stale, "Last used \(elapsed) days ago, past the \(staleAfterDays)-day limit for \(title).")
     }
 
     /// Status filters worth offering; statuses a category never produces are left out.
