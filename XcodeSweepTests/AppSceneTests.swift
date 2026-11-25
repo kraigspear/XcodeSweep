@@ -121,9 +121,12 @@ struct AppSceneTests {
                 category: .derivedData, itemCount: 59, totalBytes: 276_910_000_000,
                 reclaimableCount: reclaimableCount, reclaimableBytes: 2_000
             )
+            // The locale is pinned because the labels' widths, and so whether the row fits, depend on it.
             let renderer = ImageRenderer(content: CategoryCardView(
                 metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
-            ).frame(width: 290))
+            )
+            .frame(width: 290)
+            .environment(\.locale, Locale(identifier: "en_US")))
             return try #require(renderer.cgImage).height
         }
 
