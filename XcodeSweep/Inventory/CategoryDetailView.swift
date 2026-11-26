@@ -9,6 +9,7 @@ struct CategoryDetailView: View {
         @Bindable var bindableStore = store
         let visibleItems = store.visibleItems(for: category)
         let hasActiveFilter = store.statusFilter != .all || !store.searchText.isEmpty
+        let scanFailure = store.inventory.scanFailure(in: category)
 
         VStack(spacing: 0) {
             CategoryFilterBar(
@@ -22,7 +23,7 @@ struct CategoryDetailView: View {
             Divider()
 
             // An empty, unfiltered category explains the failure in its empty state instead.
-            if let failure = store.scanFailures[category], !visibleItems.isEmpty || hasActiveFilter {
+            if let failure = scanFailure, !visibleItems.isEmpty || hasActiveFilter {
                 CategoryScanFailureBanner(category: category, failure: failure)
                 Divider()
             }
@@ -31,7 +32,7 @@ struct CategoryDetailView: View {
                 CategoryEmptyStateView(
                     category: category,
                     isScanning: store.operation.isScanning(category),
-                    failure: store.scanFailures[category],
+                    failure: scanFailure,
                     hasActiveFilter: hasActiveFilter,
                     onResetFilters: {
                         store.statusFilter = .all

@@ -1,8 +1,9 @@
 import Foundation
 
-/// Scanned items with their derived totals.
+/// Scanned items with their derived totals and each category's scan failure.
 ///
-/// Every change returns a new value with totals recomputed, so totals can never go stale relative to items.
+/// Every change returns a new value with totals recomputed, so totals can never go stale relative to items. Failures
+/// live in the same value, so restoring an inventory restores both.
 struct StorageInventory: Equatable, Sendable {
     let scannedAt: Date?
     let volume: DiskVolume?
@@ -14,6 +15,7 @@ struct StorageInventory: Equatable, Sendable {
 
     private let itemsByCategory: [StorageCategory: [StorageItem]]
     private let itemsByID: [StorageItem.ID: StorageItem]
+    private let scanFailures: [StorageCategory: String]
 
     static let empty = StorageInventory(
         itemsByCategory: [:],
@@ -24,11 +26,13 @@ struct StorageInventory: Equatable, Sendable {
     init(
         itemsByCategory: [StorageCategory: [StorageItem]],
         scannedAt: Date?,
-        volume: DiskVolume?
+        volume: DiskVolume?,
+        scanFailures: [StorageCategory: String] = [:]
     ) {
         self.itemsByCategory = itemsByCategory
         self.scannedAt = scannedAt
         self.volume = volume
+        self.scanFailures = scanFailures
 
         categoryMetrics = StorageCategory.allCases.map { category in
             let items = itemsByCategory[category] ?? []
@@ -38,7 +42,8 @@ struct StorageInventory: Equatable, Sendable {
                 itemCount: items.count,
                 totalBytes: items.reduce(0) { $0 + $1.sizeBytes },
                 reclaimableCount: reclaimable.count,
-                reclaimableBytes: reclaimable.reduce(0) { $0 + $1.sizeBytes }
+                reclaimableBytes: reclaimable.reduce(0) { $0 + $1.sizeBytes },
+                failure: scanFailures[category]
             )
         }
         totalBytes = categoryMetrics.reduce(0) { $0 + $1.totalBytes }
@@ -55,7 +60,8 @@ struct StorageInventory: Equatable, Sendable {
         self.init(
             itemsByCategory: snapshot.itemsByCategory,
             scannedAt: snapshot.scannedAt,
-            volume: snapshot.volume
+            volume: snapshot.volume,
+            scanFailures: snapshot.failures
         )
     }
 
@@ -63,6 +69,11 @@ struct StorageInventory: Equatable, Sendable {
 
     func items(in category: StorageCategory) -> [StorageItem] {
         itemsByCategory[category] ?? []
+    }
+
+    /// Why `category`'s last scan is incomplete, or `nil` if it was fully read.
+    func scanFailure(in category: StorageCategory) -> String? {
+        scanFailures[category]
     }
 
     func item(withID id: StorageItem.ID) -> StorageItem? {
@@ -93,22 +104,40 @@ struct StorageInventory: Equatable, Sendable {
 
     // MARK: - Changes
 
-    /// Replaces one category's items, as each category arrives during a scan; the last scan date is kept.
-    func replacingItems(in category: StorageCategory, with items: [StorageItem]) -> StorageInventory {
-        var updated = itemsByCategory
-        updated[category] = items
-        return withItems(updated)
+    /// Replaces one category's items and failure, as each category arrives during a scan; the last scan date is kept.
+    func replacingItems(
+        in category: StorageCategory,
+        with items: [StorageItem],
+        failure: String?
+    ) -> StorageInventory {
+        var updatedItems = itemsByCategory
+        updatedItems[category] = items
+        var updatedFailures = scanFailures
+        updatedFailures[category] = failure
+        return with(items: updatedItems, scanFailures: updatedFailures)
+    }
+
+    /// Drops every failure while keeping items, so a scan can show the last results until each category reports.
+    func clearingFailures() -> StorageInventory {
+        with(items: itemsByCategory, scanFailures: [:])
     }
 
     func removingItems(withIDs removedIDs: Set<StorageItem.ID>) -> StorageInventory {
-        withItems(itemsByCategory.mapValues { $0.filter { !removedIDs.contains($0.id) } })
+        with(
+            items: itemsByCategory.mapValues { $0.filter { !removedIDs.contains($0.id) } },
+            scanFailures: scanFailures
+        )
     }
 
-    private func withItems(_ items: [StorageCategory: [StorageItem]]) -> StorageInventory {
+    private func with(
+        items: [StorageCategory: [StorageItem]],
+        scanFailures: [StorageCategory: String]
+    ) -> StorageInventory {
         StorageInventory(
             itemsByCategory: items,
             scannedAt: scannedAt,
-            volume: volume
+            volume: volume,
+            scanFailures: scanFailures
         )
     }
 }
@@ -120,6 +149,8 @@ struct CategoryMetrics: Identifiable, Equatable, Hashable, Sendable {
     let totalBytes: Int64
     let reclaimableCount: Int
     let reclaimableBytes: Int64
+    /// Why this category's last scan is incomplete, or `nil` if it was fully read.
+    let failure: String?
 
     var id: StorageCategory {
         category

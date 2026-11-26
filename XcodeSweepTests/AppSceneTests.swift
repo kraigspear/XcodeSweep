@@ -41,11 +41,17 @@ struct AppSceneTests {
 
     @Test("A category row in the sidebar marks a failed scan")
     func sidebarRowMarksFailedScan() throws {
-        let metrics = CategoryMetrics(category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0)
+        let failedMetrics = CategoryMetrics(
+            category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0,
+            failure: "Permission denied"
+        )
+        let cleanMetrics = CategoryMetrics(
+            category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0, failure: nil
+        )
 
-        let failed = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: "Permission denied")
+        let failed = try recognizedText(in: SidebarCategoryRow(metrics: failedMetrics, isScanning: false)
             .frame(width: 260))
-        let clean = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: nil)
+        let clean = try recognizedText(in: SidebarCategoryRow(metrics: cleanMetrics, isScanning: false)
             .frame(width: 260))
 
         #expect(failed.contains { $0.contains("Scan incomplete") }, "Recognized: \(failed)")
@@ -54,12 +60,15 @@ struct AppSceneTests {
 
     @Test("The Overview banner and card name a failed category")
     func overviewShowsFailedCategory() throws {
-        let metrics = CategoryMetrics(category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0)
+        let metrics = CategoryMetrics(
+            category: .deviceSupport, itemCount: 0, totalBytes: 0, reclaimableCount: 0, reclaimableBytes: 0,
+            failure: "Permission denied"
+        )
 
-        let banner = try recognizedText(in: ScanFailuresBanner(failures: [.deviceSupport: "Permission denied"])
+        let banner = try recognizedText(in: ScanFailuresBanner(failedMetrics: [metrics])
             .frame(width: 600))
         let card = try recognizedText(in: CategoryCardView(
-            metrics: metrics, isScanning: false, failure: "Permission denied", onOpen: {}, onSelectReclaimable: {}
+            metrics: metrics, isScanning: false, onOpen: {}, onSelectReclaimable: {}
         ).frame(width: 360))
 
         #expect(banner.contains { $0.contains("Device Support: Permission denied") }, "Recognized: \(banner)")
@@ -72,15 +81,15 @@ struct AppSceneTests {
     func reclaimableCountIsLabelledRecommended() throws {
         let metrics = CategoryMetrics(
             category: .simulatorDevices, itemCount: 59, totalBytes: 276_910_000_000,
-            reclaimableCount: 30, reclaimableBytes: 2_000
+            reclaimableCount: 30, reclaimableBytes: 2_000, failure: nil
         )
 
         // The narrowest card the Overview grid allows, and a row narrower than the narrowest sidebar
         // gives (about 185), so a label that doesn't fit is truncated or wrapped and fails here.
         let card = try recognizedText(in: CategoryCardView(
-            metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+            metrics: metrics, isScanning: false, onOpen: {}, onSelectReclaimable: {}
         ).frame(width: 290))
-        let row = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false, failure: nil)
+        let row = try recognizedText(in: SidebarCategoryRow(metrics: metrics, isScanning: false)
             .frame(width: 180))
 
         #expect(card.contains { $0.contains("Recommended") }, "Recognized: \(card)")
@@ -100,11 +109,11 @@ struct AppSceneTests {
     func reviewButtonFitsNarrowestCard(itemCount: Int, reclaimableCount: Int) throws {
         let metrics = CategoryMetrics(
             category: .derivedData, itemCount: itemCount, totalBytes: 276_910_000_000,
-            reclaimableCount: reclaimableCount, reclaimableBytes: 2_000
+            reclaimableCount: reclaimableCount, reclaimableBytes: 2_000, failure: nil
         )
 
         let card = try recognizedText(in: CategoryCardView(
-            metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+            metrics: metrics, isScanning: false, onOpen: {}, onSelectReclaimable: {}
         ).frame(width: 290))
 
         #expect(card.contains("Review \(reclaimableCount) Recommended"), "Recognized: \(card)")
@@ -119,11 +128,11 @@ struct AppSceneTests {
         func height(reclaimableCount: Int) throws -> Int {
             let metrics = CategoryMetrics(
                 category: .derivedData, itemCount: 59, totalBytes: 276_910_000_000,
-                reclaimableCount: reclaimableCount, reclaimableBytes: 2_000
+                reclaimableCount: reclaimableCount, reclaimableBytes: 2_000, failure: nil
             )
             // The locale is pinned because the labels' widths, and so whether the row fits, depend on it.
             let renderer = ImageRenderer(content: CategoryCardView(
-                metrics: metrics, isScanning: false, failure: nil, onOpen: {}, onSelectReclaimable: {}
+                metrics: metrics, isScanning: false, onOpen: {}, onSelectReclaimable: {}
             )
             .frame(width: 290)
             .environment(\.locale, Locale(identifier: "en_US")))
@@ -141,16 +150,16 @@ struct AppSceneTests {
         let width: CGFloat = 240
         let plain = CategoryMetrics(
             category: .simulatorRuntimes, itemCount: 59, totalBytes: 276_910_000_000,
-            reclaimableCount: 0, reclaimableBytes: 0
+            reclaimableCount: 0, reclaimableBytes: 0, failure: nil
         )
         let recommending = CategoryMetrics(
             category: .simulatorRuntimes, itemCount: 59, totalBytes: 276_910_000_000,
-            reclaimableCount: 30, reclaimableBytes: 2_000
+            reclaimableCount: 30, reclaimableBytes: 2_000, failure: nil
         )
 
-        let plainRow = try recognizedText(in: SidebarCategoryRow(metrics: plain, isScanning: false, failure: nil)
+        let plainRow = try recognizedText(in: SidebarCategoryRow(metrics: plain, isScanning: false)
             .frame(width: width))
-        let recommendingRow = try recognizedText(in: SidebarCategoryRow(metrics: recommending, isScanning: false, failure: nil)
+        let recommendingRow = try recognizedText(in: SidebarCategoryRow(metrics: recommending, isScanning: false)
             .frame(width: width))
 
         #expect(plainRow.contains("Simulator Runtimes"), "Recognized: \(plainRow)")
@@ -161,10 +170,12 @@ struct AppSceneTests {
         /// A filter that hides every row must not hide why some rows may be missing.
         @Test("A filtered category view still explains a failed scan")
         func filteredCategoryShowsFailureBanner() throws {
-            let store = XcodeSweepStore.preview(
-                destination: .category(.deviceSupport),
-                scanFailures: [.deviceSupport: "Permission denied"]
+            let inventory = StorageInventory.preview.replacingItems(
+                in: .deviceSupport,
+                with: StorageInventory.preview.items(in: .deviceSupport),
+                failure: "Permission denied"
             )
+            let store = XcodeSweepStore.preview(inventory: inventory, destination: .category(.deviceSupport))
             store.searchText = "no such item"
 
             let lines = try recognizedText(in: CategoryDetailView(category: .deviceSupport, store: store)
