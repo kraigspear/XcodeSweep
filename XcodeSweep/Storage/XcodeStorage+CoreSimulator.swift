@@ -7,17 +7,21 @@ extension XcodeStorage {
 
     // MARK: - Scanning
 
-    func scanSimulatorRuntimes(now: Date) async throws -> [StorageItem] {
-        let output = try await commandRunner.run(
-            executableURL: Self.xcrunURL,
-            arguments: ["simctl", "runtime", "list", "-j"],
-            timeout: Self.simctlListTimeout
-        )
-        return try Self.decodeRuntimes(from: output.stdout, now: now)
+    func scanSimulatorRuntimes(now: Date) async -> CategoryScan {
+        await CategoryScan.catchingFailure {
+            let output = try await commandRunner.run(
+                executableURL: Self.xcrunURL,
+                arguments: ["simctl", "runtime", "list", "-j"],
+                timeout: Self.simctlListTimeout
+            )
+            return try Self.decodeRuntimes(from: output.stdout, now: now)
+        }
     }
 
-    func scanSimulatorDevices(now: Date) async throws -> [StorageItem] {
-        try await listSimulatorDevices(in: .standard, now: now)
+    func scanSimulatorDevices(now: Date) async -> CategoryScan {
+        await CategoryScan.catchingFailure {
+            try await listSimulatorDevices(in: .standard, now: now)
+        }
     }
 
     /// The devices registered in `deviceSet`, as items of the category that shows that set.
@@ -140,7 +144,6 @@ extension XcodeStorage {
                 metadata: metadata
             )
         }
-        .sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
     private static func decodeDevices(
@@ -221,7 +224,7 @@ extension XcodeStorage {
             }
         }
 
-        return items.sorted { $0.sizeBytes > $1.sizeBytes }
+        return items
     }
 
     private static func readablePlatform(from platformIdentifier: String?, runtimeIdentifier: String?) -> String {
