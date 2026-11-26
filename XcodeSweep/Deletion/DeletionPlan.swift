@@ -94,7 +94,12 @@ struct DeletionProgress: Equatable, Sendable {
     let completedCount: Int
     let totalCount: Int
     let currentItemName: String
-    let removedBytes: Int64
+    /// The outcomes so far, so a stopped run can still report them.
+    let report: DeletionReport
+
+    var removedBytes: Int64 {
+        report.reclaimedBytes
+    }
 
     var fractionCompleted: Double {
         guard totalCount > 0 else { return 0 }
@@ -126,16 +131,7 @@ struct DeletionReport: Identifiable, Hashable, Sendable {
         self.wasCancelled = wasCancelled
     }
 
-    init(removed: [StorageItem], failures: [DeletionFailure], wasCancelled: Bool = false) {
-        let permanentCount = removed.filter(\.deletionMethod.isPermanent).count
-        self.init(
-            trashedCount: removed.count - permanentCount,
-            simctlDeletedCount: permanentCount,
-            reclaimedBytes: removed.reduce(0) { $0 + $1.sizeBytes },
-            failures: failures,
-            wasCancelled: wasCancelled
-        )
-    }
+    static let empty = DeletionReport(trashedCount: 0, simctlDeletedCount: 0, reclaimedBytes: 0, failures: [])
 
     var id: Self {
         self
@@ -147,6 +143,42 @@ struct DeletionReport: Identifiable, Hashable, Sendable {
 
     var hasFailures: Bool {
         !failures.isEmpty
+    }
+
+    /// Whether anything was removed or failed; a run stopped before either has nothing to report.
+    var hasOutcomes: Bool {
+        deletedCount > 0 || hasFailures
+    }
+
+    func recordingRemoval(of item: StorageItem) -> DeletionReport {
+        let isPermanent = item.deletionMethod.isPermanent
+        return DeletionReport(
+            trashedCount: trashedCount + (isPermanent ? 0 : 1),
+            simctlDeletedCount: simctlDeletedCount + (isPermanent ? 1 : 0),
+            reclaimedBytes: reclaimedBytes + item.sizeBytes,
+            failures: failures,
+            wasCancelled: wasCancelled
+        )
+    }
+
+    func recordingFailure(_ failure: DeletionFailure) -> DeletionReport {
+        DeletionReport(
+            trashedCount: trashedCount,
+            simctlDeletedCount: simctlDeletedCount,
+            reclaimedBytes: reclaimedBytes,
+            failures: failures + [failure],
+            wasCancelled: wasCancelled
+        )
+    }
+
+    func cancelled() -> DeletionReport {
+        DeletionReport(
+            trashedCount: trashedCount,
+            simctlDeletedCount: simctlDeletedCount,
+            reclaimedBytes: reclaimedBytes,
+            failures: failures,
+            wasCancelled: true
+        )
     }
 }
 

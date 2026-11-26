@@ -122,20 +122,60 @@ struct DeletionPlanTests {
         #expect(!report.summary.contains("more"))
     }
 
-    /// To replicate: cancel a cleanup after one item was removed → read the Cleanup Stopped alert.
-    @Test("A stopped report says the run was stopped and builds its counts from the removed items")
-    func stoppedReportSummary() {
-        let removed = [
-            makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd"))),
-            makeStorageItem(id: "rt", sizeBytes: 50, method: .simctlRuntime(identifier: "RT-1")),
-        ]
-        let report = DeletionReport(removed: removed, failures: [], wasCancelled: true)
+    @Test("A report counts each removal by method and adds up its bytes")
+    func recordingRemoval_countsByMethodAndSumsBytes() {
+        let trashed = makeStorageItem(id: "dd", sizeBytes: 100, method: .trashFile(URL(filePath: "/tmp/dd")))
+        let runtime = makeStorageItem(id: "rt", sizeBytes: 50, method: .simctlRuntime(identifier: "RT-1"))
+        let device = makeStorageItem(id: "sim", sizeBytes: 25, method: .simctlDevice(udid: "U-1"))
+
+        let report = DeletionReport.empty
+            .recordingRemoval(of: trashed)
+            .recordingRemoval(of: runtime)
+            .recordingRemoval(of: device)
 
         #expect(report.trashedCount == 1)
-        #expect(report.simctlDeletedCount == 1)
-        #expect(report.reclaimedBytes == 150)
-        #expect(report.summary.hasPrefix("Stopped after removing 2 items"))
-        #expect(DeletionReport(removed: removed, failures: []).summary.hasPrefix("Removed 2 items"))
+        #expect(report.simctlDeletedCount == 2)
+        #expect(report.reclaimedBytes == 175)
+        #expect(report.failures.isEmpty)
+        #expect(!report.wasCancelled)
+    }
+
+    @Test("A report keeps failures in the order they were recorded")
+    func recordingFailure_appendsInOrder() {
+        let first = DeletionFailure(itemID: "a", itemName: "A", reason: "Busy")
+        let second = DeletionFailure(itemID: "b", itemName: "B", reason: "Locked")
+
+        let report = DeletionReport.empty.recordingFailure(first).recordingFailure(second)
+
+        #expect(report.failures == [first, second])
+        #expect(report.deletedCount == 0)
+        #expect(report.reclaimedBytes == 0)
+    }
+
+    /// The store shows a stopped run's report only when something happened before the stop.
+    @Test("A report has outcomes once it records a removal or a failure")
+    func hasOutcomes_afterRemovalOrFailure() {
+        let failure = DeletionFailure(itemID: "a", itemName: "A", reason: "Busy")
+
+        #expect(!DeletionReport.empty.hasOutcomes)
+        #expect(DeletionReport.empty.recordingRemoval(of: makeStorageItem(id: "dd")).hasOutcomes)
+        #expect(DeletionReport.empty.recordingFailure(failure).hasOutcomes)
+    }
+
+    /// To replicate: cancel a cleanup after one item was removed → read the Cleanup Stopped alert.
+    @Test("A cancelled report keeps its outcomes and says the run was stopped")
+    func cancelled_keepsOutcomesAndSaysStopped() {
+        let report = DeletionReport.empty
+            .recordingRemoval(of: makeStorageItem(id: "dd", sizeBytes: 100))
+            .recordingRemoval(of: makeStorageItem(id: "dd2", sizeBytes: 50))
+
+        let stopped = report.cancelled()
+
+        #expect(stopped.wasCancelled)
+        #expect(stopped.deletedCount == report.deletedCount)
+        #expect(stopped.reclaimedBytes == report.reclaimedBytes)
+        #expect(stopped.summary.hasPrefix("Stopped after removing 2 items"))
+        #expect(report.summary.hasPrefix("Removed 2 items"))
     }
 
     @Test("Plans, reports, and failures with the same contents are equal")

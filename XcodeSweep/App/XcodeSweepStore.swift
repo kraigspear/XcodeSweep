@@ -265,8 +265,6 @@ final class XcodeSweepStore {
     /// Leaves `operation` as `.deleting`; the rescan that follows, or the stop for quitting, takes
     /// the slot from there.
     private func runDeletion(_ plan: DeletionPlan) async {
-        var removed: [StorageItem] = []
-        var failures: [DeletionFailure] = []
         do throws(CancellationError) {
             guard !Task.isCancelled else { throw CancellationError() }
             for try await event in xcodeStorage.delete(plan) {
@@ -276,16 +274,12 @@ final class XcodeSweepStore {
 
                 case let .deleted(itemID, progress):
                     operation = .deleting(progress)
-                    if let item = plan.deletableItems.first(where: { $0.id == itemID }) {
-                        removed.append(item)
-                    }
                     inventory = inventory.removingItems(withIDs: [itemID])
                     // Only this ID: a cancelled scan's rollback can hide selected rows the rescan will restore.
                     browsing.selectedItemIDs.remove(itemID)
 
-                case let .failed(failure, progress):
+                case let .failed(_, progress):
                     operation = .deleting(progress)
-                    failures.append(failure)
 
                 case let .completed(report):
                     lastDeletionReport = report
@@ -294,8 +288,8 @@ final class XcodeSweepStore {
             }
         } catch {
             // Interrupted, not failed: report what happened before the stop, if anything did.
-            if !removed.isEmpty || !failures.isEmpty {
-                lastDeletionReport = DeletionReport(removed: removed, failures: failures, wasCancelled: true)
+            if let report = operation.deletionProgress?.report, report.hasOutcomes {
+                lastDeletionReport = report.cancelled()
             }
         }
     }
