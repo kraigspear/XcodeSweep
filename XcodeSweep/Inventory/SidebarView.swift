@@ -4,7 +4,7 @@ struct SidebarView: View {
     let store: XcodeSweepStore
 
     var body: some View {
-        List(selection: Binding(get: { store.sidebarSelection }, set: { store.navigate(to: $0) })) {
+        List(selection: Binding(get: { store.browsing.destination }, set: { store.browsing.navigate(to: $0) })) {
             Section {
                 SidebarOverviewRow(
                     totalBytes: store.inventory.totalBytes,

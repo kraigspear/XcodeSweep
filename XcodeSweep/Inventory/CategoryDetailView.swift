@@ -8,13 +8,13 @@ struct CategoryDetailView: View {
     var body: some View {
         @Bindable var bindableStore = store
         let visibleItems = store.visibleItems(for: category)
-        let hasActiveFilter = store.statusFilter != .all || !store.searchText.isEmpty
+        let hasActiveFilter = store.browsing.statusFilter != .all || !store.browsing.searchText.isEmpty
         let scanFailure = store.inventory.scanFailure(in: category)
 
         VStack(spacing: 0) {
             CategoryFilterBar(
                 category: category,
-                selectedFilter: $bindableStore.statusFilter,
+                selectedFilter: $bindableStore.browsing.statusFilter,
                 totalVisibleCount: visibleItems.count,
                 totalVisibleBytes: visibleItems.reduce(0) { $0 + $1.sizeBytes },
                 isScanning: store.operation.isScanning(category)
@@ -35,15 +35,15 @@ struct CategoryDetailView: View {
                     failure: scanFailure,
                     hasActiveFilter: hasActiveFilter,
                     onResetFilters: {
-                        store.statusFilter = .all
-                        store.searchText = ""
+                        store.browsing.statusFilter = .all
+                        store.browsing.searchText = ""
                     }
                 )
             } else {
                 Table(
                     visibleItems,
-                    selection: $bindableStore.selectedItemIDs,
-                    sortOrder: $bindableStore.sortOrder
+                    selection: $bindableStore.browsing.selectedItemIDs,
+                    sortOrder: $bindableStore.browsing.sortOrder
                 ) {
                     TableColumn("Name", value: \.name) { item in
                         VStack(alignment: .leading, spacing: 2) {
@@ -99,14 +99,14 @@ struct CategoryDetailView: View {
             SelectionActionFooter(
                 selectionPlan: store.selectionPlan,
                 operation: store.operation,
-                onSelectReclaimable: { store.selectReclaimableInActiveCategory() },
-                onSelectAll: { store.selectAllDeletableInActiveCategory() },
-                onClearSelection: { store.clearSelection() },
+                onSelectReclaimable: { store.browsing.selectReclaimableInActiveCategory(in: store.inventory) },
+                onSelectAll: { store.browsing.selectAllDeletableInActiveCategory(in: store.inventory) },
+                onClearSelection: { store.browsing.clearSelection() },
                 onRequestDelete: { store.requestDeleteSelected() }
             )
         }
         .navigationTitle(category.title)
-        .searchable(text: $bindableStore.searchText, prompt: "Filter \(category.title)…")
+        .searchable(text: $bindableStore.browsing.searchText, prompt: "Filter \(category.title)…")
     }
 }
 

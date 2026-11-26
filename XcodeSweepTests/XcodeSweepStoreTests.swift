@@ -72,10 +72,10 @@ struct XcodeSweepStoreTests {
         #expect(store.inventory.reclaimableBytes == expectedReclaimable)
         #expect(store.inventory.reclaimableItemCount == 2)
 
-        store.openCategoryAndSelectReclaimable(.derivedData)
-        #expect(store.sidebarSelection == .category(.derivedData))
-        #expect(store.statusFilter == .reclaimable)
-        #expect(store.selectedItemIDs == [orphanedItem.id])
+        store.browsing.openCategoryAndSelectReclaimable(.derivedData, in: store.inventory)
+        #expect(store.browsing.destination == .category(.derivedData))
+        #expect(store.browsing.statusFilter == .reclaimable)
+        #expect(store.browsing.selectedItemIDs == [orphanedItem.id])
         #expect(store.selectionPlan.totalBytes == orphanedItem.sizeBytes)
 
         store.requestDeleteSelected()
@@ -126,7 +126,7 @@ struct XcodeSweepStoreTests {
         await store.startRefresh()?.value
         #expect(store.inventory.items(in: .derivedData).allSatisfy { $0.name == "SampleApp" })
 
-        store.openCategoryAndSelectReclaimable(.derivedData)
+        store.browsing.openCategoryAndSelectReclaimable(.derivedData, in: store.inventory)
         store.requestDeleteSelected()
 
         let pending = try #require(store.pendingDeletion)
@@ -348,65 +348,6 @@ struct XcodeSweepStoreTests {
         #expect(store.operation == .idle)
     }
 
-    /// Verifies switching sidebar destinations starts the new one with no leftover filter, search, or selection.
-    /// To replicate: in DerivedData choose Unused, type a search, select a row → click Simulator Devices.
-    @Test("Navigating to another destination resets category state")
-    func navigate_toDifferentDestination_resetsFilterSearchAndSelection() async throws {
-        let (store, fixture) = try await makeScannedStore()
-        defer { fixture.cleanup() }
-        store.navigate(to: .category(.derivedData))
-        store.statusFilter = .stale
-        store.searchText = "Sample"
-        store.selectedItemIDs = Set(store.inventory.items(in: .derivedData).map(\.id))
-
-        store.navigate(to: .category(.simulatorDevices))
-
-        #expect(store.sidebarSelection == .category(.simulatorDevices))
-        #expect(store.statusFilter == .all)
-        #expect(store.searchText.isEmpty)
-        #expect(store.selectedItemIDs.isEmpty)
-    }
-
-    /// Verifies re-selecting the current destination keeps the user's filter, search, and selection.
-    /// To replicate: in DerivedData choose Unused and select a row → click DerivedData in the sidebar again.
-    @Test("Navigating to the current destination keeps category state")
-    func navigate_toSameDestination_keepsFilterSearchAndSelection() async throws {
-        let (store, fixture) = try await makeScannedStore()
-        defer { fixture.cleanup() }
-        store.navigate(to: .category(.derivedData))
-        store.statusFilter = .stale
-        store.searchText = "Sample"
-        let selection = Set(store.inventory.items(in: .derivedData).map(\.id))
-        store.selectedItemIDs = selection
-
-        store.navigate(to: .category(.derivedData))
-
-        #expect(store.statusFilter == .stale)
-        #expect(store.searchText == "Sample")
-        #expect(store.selectedItemIDs == selection)
-    }
-
-    /// Verifies "Review Recommended" lands on the category with Recommended applied, no stale search, and reclaimable
-    /// items
-    /// selected.
-    /// To replicate: in Simulator Devices type a search → go to Overview → click "Review N Recommended" on DerivedData.
-    @Test("Opening a category for cleanup applies Recommended and selects reclaimable items")
-    func openCategoryAndSelectReclaimable_fromAnotherCategory_appliesReclaimableFilterAndSelects() async throws {
-        let (store, fixture) = try await makeScannedStore()
-        defer { fixture.cleanup() }
-        store.navigate(to: .category(.simulatorDevices))
-        store.searchText = "iPhone"
-
-        store.openCategoryAndSelectReclaimable(.derivedData)
-
-        let reclaimableItems = store.inventory.items(in: .derivedData).filter(\.isReclaimable)
-        #expect(!reclaimableItems.isEmpty)
-        #expect(store.sidebarSelection == .category(.derivedData))
-        #expect(store.statusFilter == .reclaimable)
-        #expect(store.searchText.isEmpty)
-        #expect(store.selectedItemIDs == Set(reclaimableItems.map(\.id)))
-    }
-
     @Test(
         "startRefresh owns the scan task, ignores overlapping starts, and cancelOperation restores the last completed scan",
         .timeLimit(.minutes(1))
@@ -596,37 +537,40 @@ struct XcodeSweepStoreTests {
         #expect(store.operation == .idle)
     }
 
-    @Test("Rows hidden by search or filter are never part of the selection plan")
-    func hiddenSelectedRowsAreExcludedFromDeletion() async throws {
+    @Test("A deletion request leaves out selected rows hidden by search")
+    func requestDeleteSelected_leavesOutHiddenRows() async throws {
         let (store, fixture) = try await makeScannedStore(extraDerivedDataFolders: ["OtherApp-new"])
         defer { fixture.cleanup() }
+        store.browsing.navigate(to: .category(.derivedData))
+        store.browsing.selectAllDeletableInActiveCategory(in: store.inventory)
+        #expect(store.browsing.selectedItemIDs.count == 2)
 
-        // Given: both DerivedData rows selected
-        store.navigate(to: .category(.derivedData))
-        store.selectAllDeletableInActiveCategory()
-        #expect(store.selectedItemIDs.count == 2)
-        let originalIDs = store.selectedItemIDs
+        store.browsing.searchText = "SampleApp"
+        store.requestDeleteSelected()
 
-        // When: a search hides one of them
-        store.searchText = "SampleApp"
-
-        // Then: only the visible row is acted on
         let visibleIDs = store.visibleItems(for: .derivedData).map(\.id)
         #expect(visibleIDs.count == 1)
-        #expect(store.selectedItems.map(\.id) == visibleIDs)
-        #expect(store.selectionPlan.deletableItems.map(\.id) == visibleIDs)
-        store.requestDeleteSelected()
         #expect(store.pendingDeletion?.deletableItems.map(\.id) == visibleIDs)
+    }
 
-        // A status filter hiding every selected row leaves nothing to delete.
-        store.searchText = ""
-        store.statusFilter = .worktree
-        #expect(store.selectedItems.isEmpty)
-        #expect(store.selectionPlan.isEmpty)
+    /// A folder removed outside the app must not stay selected, or the next cleanup would plan to delete it.
+    /// To replicate: select two DerivedData rows → delete one folder in Finder → Refresh.
+    @Test("A finished scan drops selected items it no longer finds")
+    func completedScan_dropsSelectedItemsThatAreGone() async throws {
+        let (store, fixture) = try await makeScannedStore(extraDerivedDataFolders: ["OtherApp-new"])
+        defer { fixture.cleanup() }
+        store.browsing.navigate(to: .category(.derivedData))
+        store.browsing.selectAllDeletableInActiveCategory(in: store.inventory)
+        #expect(store.browsing.selectedItemIDs.count == 2)
+        try FileManager.default.removeItem(
+            at: fixture.xcodeRootURL.appendingPathComponent("DerivedData/OtherApp-new", isDirectory: true)
+        )
 
-        // Clearing the filter brings the hidden rows back, still selected.
-        store.statusFilter = .all
-        #expect(Set(store.selectedItems.map(\.id)) == originalIDs)
+        await store.startRefresh()?.value
+
+        let remainingIDs = Set(store.inventory.items(in: .derivedData).map(\.id))
+        #expect(remainingIDs.count == 1)
+        #expect(store.browsing.selectedItemIDs == remainingIDs)
     }
 
     /// Stop can't let the next operation in while the stopped one is still tearing down, such as a

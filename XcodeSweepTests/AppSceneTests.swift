@@ -176,7 +176,7 @@ struct AppSceneTests {
                 failure: "Permission denied"
             )
             let store = XcodeSweepStore.preview(inventory: inventory, destination: .category(.deviceSupport))
-            store.searchText = "no such item"
+            store.browsing.searchText = "no such item"
 
             let lines = try recognizedText(in: CategoryDetailView(category: .deviceSupport, store: store)
                 .frame(width: 700, height: 400))

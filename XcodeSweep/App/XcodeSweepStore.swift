@@ -45,7 +45,7 @@ enum OperationState: Equatable, Sendable {
     }
 }
 
-/// The app's observable state: the scanned inventory, navigation, selection, and the scan and deletion flows.
+/// The app's observable state: the scanned inventory, browsing, and the scan and deletion flows.
 ///
 /// Scans and deletions never overlap; `operation` tracks which one, if any, is running.
 @MainActor
@@ -53,14 +53,7 @@ enum OperationState: Equatable, Sendable {
 final class XcodeSweepStore {
     // MARK: - Stored UI State
 
-    private(set) var sidebarSelection: SidebarSelection = .overview
-
-    var selectedItemIDs: Set<StorageItem.ID> = []
-    var searchText = ""
-    var statusFilter: ItemFilter = .all
-    var sortOrder: [KeyPathComparator<StorageItem>] = [
-        KeyPathComparator(\.sizeBytes, order: .reverse),
-    ]
+    var browsing = Browsing()
     var inspectorPresented = true
 
     /// The scan or deletion in progress; a new one starts only while this is `.idle`.
@@ -193,7 +186,7 @@ final class XcodeSweepStore {
 
                 case let .completed(snapshot):
                     inventory = StorageInventory(snapshot: snapshot)
-                    pruneStaleSelection()
+                    browsing.reconcile(with: inventory)
                     return
                 }
             }
@@ -207,72 +200,17 @@ final class XcodeSweepStore {
 
     /// Items in `category` after the current status filter, search text, and sort order.
     func visibleItems(for category: StorageCategory) -> [StorageItem] {
-        inventory.items(in: category, matching: statusFilter, search: searchText, sortedBy: sortOrder)
+        browsing.visibleItems(for: category, in: inventory)
     }
 
-    /// The category shown in the detail column; `nil` on the overview.
-    var activeCategory: StorageCategory? {
-        if case let .category(category) = sidebarSelection {
-            return category
-        }
-        return nil
-    }
-
-    /// Selected items currently visible in the active category, in table order.
-    ///
-    /// Filtering keeps the selected IDs, so a hidden row is selected again when it reappears.
-    /// Hidden rows are left out of the inspector and of any deletion plan built while they are hidden.
+    /// Selected items currently visible in the active category; hidden rows are left out.
     var selectedItems: [StorageItem] {
-        // The footer, inspector, and menu read this constantly; don't sort a category for nothing.
-        guard !selectedItemIDs.isEmpty, let category = activeCategory else { return [] }
-        return visibleItems(for: category).filter { selectedItemIDs.contains($0.id) }
+        browsing.selectedItems(in: inventory)
     }
 
     /// The deletion plan for the current selection.
     var selectionPlan: DeletionPlan {
         DeletionPlan(selection: selectedItems)
-    }
-
-    // MARK: - Navigation
-
-    /// Moves to `destination`.
-    ///
-    /// A new destination starts with no selection, filter, or search; re-selecting the current one
-    /// keeps what the user set.
-    func navigate(to destination: SidebarSelection) {
-        guard destination != sidebarSelection else { return }
-        sidebarSelection = destination
-        selectedItemIDs.removeAll()
-        statusFilter = .all
-        searchText = ""
-    }
-
-    // MARK: - Selection Helpers
-
-    /// Opens `category` filtered to reclaimable items, with all of them selected.
-    func openCategoryAndSelectReclaimable(_ category: StorageCategory) {
-        navigate(to: .category(category))
-        statusFilter = .reclaimable
-        let reclaimableItems = inventory.items(in: category).filter(\.isReclaimable)
-        selectedItemIDs = Set(reclaimableItems.map(\.id))
-    }
-
-    /// Selects the visible reclaimable items in the active category.
-    func selectReclaimableInActiveCategory() {
-        guard let category = activeCategory else { return }
-        let reclaimableItems = visibleItems(for: category).filter(\.isReclaimable)
-        selectedItemIDs = Set(reclaimableItems.map(\.id))
-    }
-
-    /// Selects every visible deletable item in the active category.
-    func selectAllDeletableInActiveCategory() {
-        guard let category = activeCategory else { return }
-        let deletable = visibleItems(for: category).filter(\.isDeletable)
-        selectedItemIDs = Set(deletable.map(\.id))
-    }
-
-    func clearSelection() {
-        selectedItemIDs.removeAll()
     }
 
     // MARK: - Deletion Flow
@@ -341,7 +279,8 @@ final class XcodeSweepStore {
                     if let item = plan.deletableItems.first(where: { $0.id == itemID }) {
                         removed.append(item)
                     }
-                    removeItems(withIDs: [itemID])
+                    inventory = inventory.removingItems(withIDs: [itemID])
+                    browsing.reconcile(with: inventory)
 
                 case let .failed(failure, progress):
                     operation = .deleting(progress)
@@ -359,22 +298,6 @@ final class XcodeSweepStore {
             }
         }
     }
-
-    private func removeItems(withIDs removedIDs: Set<StorageItem.ID>) {
-        inventory = inventory.removingItems(withIDs: removedIDs)
-        selectedItemIDs.subtract(removedIDs)
-    }
-
-    // MARK: - Selection Pruning
-
-    private func pruneStaleSelection() {
-        guard let category = activeCategory else {
-            selectedItemIDs.removeAll()
-            return
-        }
-        let validIDs = Set(inventory.items(in: category).map(\.id))
-        selectedItemIDs.formIntersection(validIDs)
-    }
 }
 
 #if DEBUG && canImport(SwiftUI)
@@ -387,8 +310,8 @@ final class XcodeSweepStore {
         ) -> XcodeSweepStore {
             let store = XcodeSweepStore(xcodeStorage: .preview)
             store.inventory = inventory
-            store.navigate(to: destination)
-            store.selectedItemIDs = selectedItemIDs
+            store.browsing.navigate(to: destination)
+            store.browsing.selectedItemIDs = selectedItemIDs
             return store
         }
     }

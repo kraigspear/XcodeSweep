@@ -27,10 +27,10 @@ struct OverviewView: View {
                     metrics: store.inventory.categoryMetrics,
                     isCategoryScanning: { store.operation.isScanning($0) },
                     onOpenCategory: { category in
-                        store.navigate(to: .category(category))
+                        store.browsing.navigate(to: .category(category))
                     },
                     onSelectReclaimable: { category in
-                        store.openCategoryAndSelectReclaimable(category)
+                        store.browsing.openCategoryAndSelectReclaimable(category, in: store.inventory)
                     }
                 )
             }

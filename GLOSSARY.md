@@ -12,6 +12,10 @@ _Avoid_: StorageService, LiveStorageService, StorageManager, StorageEngine
 The scanned items in every category, the totals derived from them, and each category's scan failure. Changing the items always produces a new inventory, so totals never disagree with the items, and failures are kept, replaced, or restored along with them.
 _Avoid_: ScanSummary, summary, scanFailures (as separate state)
 
+**Browsing**:
+Where the user is and what they've narrowed to: destination, search, filter, sort, and selection. Moving to a new destination resets the rest.
+_Avoid_: UI state, navigation state, view model
+
 **Reclaimable**:
 An item that is deletable and has a reclaimable status: orphaned, unavailable, or unused. The UI labels this "Recommended".
 _Avoid_: recommended, cleanup candidate (in code; "Recommended" is UI text only); cleanable (anywhere)

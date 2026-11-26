@@ -102,7 +102,7 @@ private struct DetailRouterView: View {
     let store: XcodeSweepStore
 
     var body: some View {
-        switch store.sidebarSelection {
+        switch store.browsing.destination {
         case .overview:
             OverviewView(store: store)
         case let .category(category):
