@@ -465,7 +465,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
         private let storage: XcodeStorage
         private let items: [StorageItem]
         private var phase: Phase
-        private var report = DeletionReport.empty
+        private var deletionReport = DeletionReport.empty
 
         init(storage: XcodeStorage, items: [StorageItem]) {
             self.storage = storage
@@ -478,7 +478,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
                 completedCount: index + 1,
                 totalCount: items.count,
                 currentItemName: items[index].name,
-                report: report
+                report: deletionReport
             )
         }
 
@@ -499,7 +499,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
                     completedCount: index,
                     totalCount: items.count,
                     currentItemName: item.name,
-                    report: report
+                    report: deletionReport
                 )
                 return .starting(progress)
 
@@ -513,7 +513,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
                     outcome=removed method=\(item.deletionMethod.logName, privacy: .public) \
                     bytes=\(item.sizeBytes, privacy: .public) target=\(item.deletionMethod.logTarget, privacy: .public)
                     """)
-                    report = report.recordingRemoval(of: item)
+                    deletionReport = deletionReport.recordingRemoval(of: item)
                     return .deleted(itemID: item.id, progress: progress(completing: index))
                 } catch is RemovalInterrupted {
                     // A stopped trash move or simctl command may still have taken effect.
@@ -541,13 +541,13 @@ private struct DeletionStream: AsyncSequence, Sendable {
                         itemName: item.name,
                         reason: error.localizedDescription
                     )
-                    report = report.recordingFailure(failure)
+                    deletionReport = deletionReport.recordingFailure(failure)
                     return .failed(failure, progress: progress(completing: index))
                 }
 
             case .finish:
                 phase = .done
-                return .completed(report)
+                return .completed(deletionReport)
             }
         }
     }
