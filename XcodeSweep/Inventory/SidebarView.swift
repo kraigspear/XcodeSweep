@@ -17,8 +17,7 @@ struct SidebarView: View {
                 ForEach(store.inventory.categoryMetrics) { metrics in
                     SidebarCategoryRow(
                         metrics: metrics,
-                        isScanning: store.operation.isScanning(metrics.category),
-                        failure: store.scanFailures[metrics.category]
+                        isScanning: store.operation.isScanning(metrics.category)
                     )
                     .tag(SidebarSelection.category(metrics.category))
                 }
@@ -56,7 +55,6 @@ private struct SidebarOverviewRow: View {
 struct SidebarCategoryRow: View {
     let metrics: CategoryMetrics
     let isScanning: Bool
-    let failure: String?
 
     var body: some View {
         // The caption gets the row's full width below the title; beside it, a caption wider than the
@@ -74,7 +72,7 @@ struct SidebarCategoryRow: View {
                         Text(metrics.totalBytes, format: .byteCount(style: .file))
                             .font(.callout.monospacedDigit())
                             .foregroundStyle(metrics.totalBytes > 0 ? .primary : .secondary)
-                        if let failure {
+                        if let failure = metrics.failure {
                             ScanFailureBadge(failure: failure)
                         }
                     }

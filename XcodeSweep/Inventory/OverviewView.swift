@@ -16,8 +16,9 @@ struct OverviewView: View {
                     isScanning: store.operation.isScanning
                 )
 
-                if !store.scanFailures.isEmpty {
-                    ScanFailuresBanner(failures: store.scanFailures)
+                let failedMetrics = store.inventory.categoryMetrics.filter { $0.failure != nil }
+                if !failedMetrics.isEmpty {
+                    ScanFailuresBanner(failedMetrics: failedMetrics)
                 }
 
                 StorageBreakdownChartCard(metrics: store.inventory.categoryMetrics)
@@ -25,7 +26,6 @@ struct OverviewView: View {
                 CategoryGridSection(
                     metrics: store.inventory.categoryMetrics,
                     isCategoryScanning: { store.operation.isScanning($0) },
-                    scanFailure: { store.scanFailures[$0] },
                     onOpenCategory: { category in
                         store.navigate(to: .category(category))
                     },
@@ -182,7 +182,6 @@ private struct StorageBreakdownChartCard: View {
 private struct CategoryGridSection: View {
     let metrics: [CategoryMetrics]
     let isCategoryScanning: (StorageCategory) -> Bool
-    let scanFailure: (StorageCategory) -> String?
     let onOpenCategory: (StorageCategory) -> Void
     let onSelectReclaimable: (StorageCategory) -> Void
 
@@ -200,7 +199,6 @@ private struct CategoryGridSection: View {
                     CategoryCardView(
                         metrics: metric,
                         isScanning: isCategoryScanning(metric.category),
-                        failure: scanFailure(metric.category),
                         onOpen: { onOpenCategory(metric.category) },
                         onSelectReclaimable: { onSelectReclaimable(metric.category) }
                     )
@@ -213,7 +211,6 @@ private struct CategoryGridSection: View {
 struct CategoryCardView: View {
     let metrics: CategoryMetrics
     let isScanning: Bool
-    let failure: String?
     let onOpen: () -> Void
     let onSelectReclaimable: () -> Void
 
@@ -237,7 +234,7 @@ struct CategoryCardView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
 
-            if let failure, !isScanning {
+            if let failure = metrics.failure {
                 ScanFailureBadge(failure: failure)
             }
 
@@ -289,7 +286,7 @@ struct CategoryCardView: View {
 }
 
 struct ScanFailuresBanner: View {
-    let failures: [StorageCategory: String]
+    let failedMetrics: [CategoryMetrics]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -297,8 +294,8 @@ struct ScanFailuresBanner: View {
                 .font(.headline)
                 .foregroundStyle(.orange)
 
-            ForEach(StorageCategory.allCases.filter { failures[$0] != nil }) { category in
-                Text("\(category.title): \(failures[category] ?? "")")
+            ForEach(failedMetrics) { metrics in
+                Text("\(metrics.category.title): \(metrics.failure ?? "")")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

@@ -23,8 +23,9 @@
             )
             #expect(!FileManager.default.fileExists(atPath: scanRoot.path(percentEncoded: false)))
             #expect(store.inventory.totalItemCount == 0)
-            #expect(!store.scanFailures.isEmpty)
-            #expect(store.scanFailures.values.allSatisfy { $0.contains(refusal) })
+            let failures = store.inventory.categoryMetrics.compactMap(\.failure)
+            #expect(!failures.isEmpty)
+            #expect(failures.allSatisfy { $0.contains(refusal) })
         }
 
         /// Verifies a confirmed cleanup in a preview leaves real files and simulators alone.

@@ -66,8 +66,6 @@ final class XcodeSweepStore {
     /// The scan or deletion in progress; a new one starts only while this is `.idle`.
     private(set) var operation: OperationState = .idle
     private(set) var inventory: StorageInventory = .empty
-    /// Why a category's last scan is incomplete, for each category that couldn't be fully read.
-    private(set) var scanFailures: [StorageCategory: String] = [:]
     /// The plan awaiting the user's confirmation; non-nil presents the confirmation dialog.
     var pendingDeletion: DeletionPlan?
     /// The outcome of the last finished deletion; non-nil presents the completion alert.
@@ -164,27 +162,20 @@ final class XcodeSweepStore {
     /// operation is running, as `startRefresh()` does and a finishing deletion does for its rescan.
     private func beginRefresh() -> Task<Void, Never> {
         let previousInventory = inventory
-        let previousFailures = scanFailures
 
         pendingDeletion = nil
         operation = .scanning(completed: [])
-        scanFailures = [:]
+        inventory = inventory.clearingFailures()
 
         let task = Task { [weak self] in
             guard let self else { return }
-            await self.runRefresh(
-                previousInventory: previousInventory,
-                previousFailures: previousFailures
-            )
+            await self.runRefresh(previousInventory: previousInventory)
         }
         operationTask = task
         return task
     }
 
-    private func runRefresh(
-        previousInventory: StorageInventory,
-        previousFailures: [StorageCategory: String]
-    ) async {
+    private func runRefresh(previousInventory: StorageInventory) async {
         defer {
             operation = .idle
             operationTask = nil
@@ -196,14 +187,12 @@ final class XcodeSweepStore {
             for try await event in xcodeStorage.scan() {
                 switch event {
                 case let .categoryScanned(category, items, failure):
-                    inventory = inventory.replacingItems(in: category, with: items)
-                    scanFailures[category] = failure
+                    inventory = inventory.replacingItems(in: category, with: items, failure: failure)
                     completed.insert(category)
                     operation = .scanning(completed: completed)
 
                 case let .completed(snapshot):
                     inventory = StorageInventory(snapshot: snapshot)
-                    scanFailures = snapshot.failures
                     pruneStaleSelection()
                     return
                 }
@@ -211,7 +200,6 @@ final class XcodeSweepStore {
         } catch {
             // Interrupted, not failed: restore the inventory from when this scan began, and report nothing.
             inventory = previousInventory
-            scanFailures = previousFailures
         }
     }
 
@@ -395,12 +383,10 @@ final class XcodeSweepStore {
         static func preview(
             inventory: StorageInventory = .preview,
             destination: SidebarSelection = .overview,
-            selectedItemIDs: Set<StorageItem.ID> = [],
-            scanFailures: [StorageCategory: String] = [:]
+            selectedItemIDs: Set<StorageItem.ID> = []
         ) -> XcodeSweepStore {
             let store = XcodeSweepStore(xcodeStorage: .preview)
             store.inventory = inventory
-            store.scanFailures = scanFailures
             store.navigate(to: destination)
             store.selectedItemIDs = selectedItemIDs
             return store

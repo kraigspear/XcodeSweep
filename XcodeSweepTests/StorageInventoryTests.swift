@@ -71,7 +71,7 @@ struct StorageInventoryTests {
             makeStorageItem(id: "sim", category: .simulatorDevices, sizeBytes: 5),
         ])
 
-        let updated = inventory.replacingItems(in: .derivedData, with: [makeStorageItem(id: "new", sizeBytes: 7)])
+        let updated = inventory.replacingItems(in: .derivedData, with: [makeStorageItem(id: "new", sizeBytes: 7)], failure: nil)
 
         #expect(updated.items(in: .derivedData).map(\.id) == ["new"])
         #expect(updated.item(withID: "new") != nil)
@@ -149,11 +149,96 @@ struct StorageInventoryTests {
         #expect(ItemStatus.reclaimableStatusSummary == "orphaned, unavailable, or unused")
     }
 
-    private func makeInventory(_ items: [StorageItem]) -> StorageInventory {
+    // MARK: - Scan failures
+
+    /// Verifies each category's metrics carry its scan failure, so a view never joins failures from elsewhere.
+    /// To replicate: make `~/Library/Developer/Xcode/iOS DeviceSupport` unreadable (`chmod 000`) → scan → the
+    /// sidebar row and Overview card both warn → restore its permissions.
+    @Test("A snapshot's failures reach that category's metrics")
+    func initFromSnapshot_carriesFailuresToCategoryMetrics() throws {
+        let snapshot = ScanSnapshot(
+            scannedAt: scannedAt,
+            itemsByCategory: [:],
+            volume: nil,
+            failures: [.deviceSupport: "Permission denied"]
+        )
+
+        let inventory = StorageInventory(snapshot: snapshot)
+
+        #expect(inventory.scanFailure(in: .deviceSupport) == "Permission denied")
+        let deviceSupport = try #require(inventory.categoryMetrics.first { $0.category == .deviceSupport })
+        #expect(deviceSupport.failure == "Permission denied")
+        #expect(inventory.categoryMetrics.filter { $0.failure != nil }.map(\.category) == [.deviceSupport])
+    }
+
+    /// Verifies a category arriving mid-scan sets its own failure, and a clean rescan of it clears the old one.
+    /// To replicate: scan with simctl broken → fix simctl → rescan → the Simulator Devices warning goes away.
+    @Test("Replacing a category sets or clears only its failure")
+    func replacingItems_setsOrClearsOnlyThatCategorysFailure() {
+        let inventory = makeInventory([], scanFailures: [.simulatorDevices: "simctl unavailable", .previews: "Busy"])
+
+        let failed = inventory.replacingItems(in: .deviceSupport, with: [], failure: "Permission denied")
+        let recovered = failed.replacingItems(in: .simulatorDevices, with: [], failure: nil)
+
+        #expect(recovered.scanFailure(in: .deviceSupport) == "Permission denied")
+        #expect(recovered.scanFailure(in: .simulatorDevices) == nil)
+        #expect(recovered.scanFailure(in: .previews) == "Busy")
+    }
+
+    /// Verifies a scan starts with no warnings while the last results stay visible.
+    /// To replicate: scan with a failure → press ⌘R → the warning disappears while sizes stay until each
+    /// category reports.
+    @Test("Clearing failures keeps items and totals")
+    func clearingFailures_removesEveryFailureButKeepsItems() {
+        let inventory = makeInventory(
+            [makeStorageItem(id: "a", sizeBytes: 100, status: .orphaned)],
+            scanFailures: [.deviceSupport: "Permission denied", .simulatorRuntimes: "Timed out"]
+        )
+
+        let cleared = inventory.clearingFailures()
+
+        #expect(cleared.categoryMetrics.allSatisfy { $0.failure == nil })
+        #expect(cleared.items(in: .derivedData).map(\.id) == ["a"])
+        #expect(cleared.totalBytes == 100)
+        #expect(cleared.scannedAt == scannedAt)
+    }
+
+    /// Verifies clearing then refilling one category cannot leave a failure on a category still scanning, which is
+    /// why the Overview card doesn't check for scanning before showing a failure.
+    /// To replicate: scan with two failing categories → press ⌘R → while the second still scans, it shows no warning.
+    @Test("After clearing, only categories that report again carry a failure")
+    func clearingThenReplacing_leavesUnreportedCategoriesWithoutFailure() {
+        let inventory = makeInventory([], scanFailures: [.deviceSupport: "Old", .simulatorRuntimes: "Old"])
+
+        let midScan = inventory.clearingFailures().replacingItems(in: .deviceSupport, with: [], failure: "New")
+
+        #expect(midScan.scanFailure(in: .deviceSupport) == "New")
+        #expect(midScan.scanFailure(in: .simulatorRuntimes) == nil)
+    }
+
+    /// Verifies a deletion leaves scan warnings in place until the rescan that follows it.
+    /// To replicate: scan with a DeviceSupport failure → trash a DerivedData folder → the warning stays.
+    @Test("Removing items keeps failures")
+    func removingItems_keepsFailures() {
+        let inventory = makeInventory(
+            [makeStorageItem(id: "a", sizeBytes: 100, status: .orphaned)],
+            scanFailures: [.deviceSupport: "Permission denied"]
+        )
+
+        let updated = inventory.removingItems(withIDs: ["a"])
+
+        #expect(updated.scanFailure(in: .deviceSupport) == "Permission denied")
+    }
+
+    private func makeInventory(
+        _ items: [StorageItem],
+        scanFailures: [StorageCategory: String] = [:]
+    ) -> StorageInventory {
         StorageInventory(
             itemsByCategory: Dictionary(grouping: items, by: \.category),
             scannedAt: scannedAt,
-            volume: DiskVolume(name: "Test Volume", availableBytes: 500, totalBytes: 1000)
+            volume: DiskVolume(name: "Test Volume", availableBytes: 500, totalBytes: 1000),
+            scanFailures: scanFailures
         )
     }
 }
