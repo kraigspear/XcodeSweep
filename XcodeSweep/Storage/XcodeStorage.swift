@@ -36,7 +36,7 @@ struct CategoryScan: Sendable {
         self.failure = failure
     }
 
-    /// Joins `failures`, one per line; none means the scan is complete.
+    /// Joins `failures`, one per line; with none, `failure` is `nil`.
     init(items: [StorageItem], failures: [String]) {
         self.init(items: items, failure: failures.isEmpty ? nil : failures.joined(separator: "\n"))
     }
@@ -180,7 +180,7 @@ struct XcodeStorage: Sendable {
     /// Scans one category, sorted largest first.
     ///
     /// Never throws: each category scan turns its own errors into the result's failure. A scan cut
-    /// short by cancellation returns what it has, which the producer then drops.
+    /// short by cancellation may return partial or empty results, which the producer drops.
     func scan(_ category: StorageCategory, in context: ScanContext) async -> CategoryScan {
         let result = switch category {
         case .derivedData:

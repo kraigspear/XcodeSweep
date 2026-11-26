@@ -257,9 +257,10 @@ struct XcodeStorageScanTests {
         }
     }
 
-    /// Tables open largest first, and Overview's "Review Recommended" picks from that order.
+    /// A completed snapshot lists each category's items largest first.
     @Test("Every category's items arrive largest first")
     func scannedItemsArriveLargestFirst() async throws {
+        // Given: DerivedData folders of mixed sizes, and simctl listing devices smallest first
         let fixture = try TempXcodeFixture()
         defer { fixture.cleanup() }
         let now = testISO8601Date("2026-11-21T10:00:00Z")
@@ -271,7 +272,6 @@ struct XcodeStorageScanTests {
                 payloadBytes: payloadBytes
             )
         }
-        // simctl lists these smallest first, so only a sort puts them largest first.
         let devicesJSON = """
         {
           "devices": {
@@ -293,14 +293,48 @@ struct XcodeStorageScanTests {
             now: { now }
         )
 
+        // When
         let snapshot = try await finalScanSnapshot(from: storage)
 
+        // Then: only a sort puts simctl's devices largest first
         #expect(snapshot.itemsByCategory[.simulatorDevices]?.map(\.name) == ["Large", "Medium", "Small"])
         #expect(snapshot.itemsByCategory[.derivedData]?.count == 3)
         for (category, items) in snapshot.itemsByCategory {
             let sizes = items.map(\.sizeBytes)
             #expect(sizes == sizes.sorted(by: >), "\(category) isn't largest first")
         }
+    }
+
+    /// Stop must not wait for Archives to be listed once a shared cache's inspection is cancelled.
+    @Test("Archives & Caches stops at a cancelled shared cache, without listing Archives")
+    func archivesAndCaches_cancelledAtSharedCache_returnsEmpty() async throws {
+        // Given: a shared cache to inspect, and an Archives folder that would fail to list
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        _ = try fixture.addModuleCache(modifiedDate: now)
+        let archivesURL = fixture.xcodeRootURL.appendingPathComponent("Archives", isDirectory: true)
+        try FileManager.default.createDirectory(at: archivesURL, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: archivesURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: archivesURL.path) }
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+        let sharedCaches = storage.derivedDataFolders().sharedCaches
+        #expect(!sharedCaches.isEmpty)
+
+        // When: the scan runs in a cancelled task
+        let result = await Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await storage.scanArchivesAndCaches(sharedCaches: sharedCaches, now: now)
+        }.value
+
+        // Then: nothing, not even the Archives failure
+        #expect(result.items.isEmpty)
+        #expect(result.failure == nil)
     }
 
     @Test("Records a failure for each simctl category instead of failing the scan")
