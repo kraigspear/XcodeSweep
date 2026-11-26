@@ -152,7 +152,8 @@ struct StorageInventoryTests {
     // MARK: - Scan failures
 
     /// Verifies each category's metrics carry its scan failure, so a view never joins failures from elsewhere.
-    /// To replicate: deny Full Disk Access to DeviceSupport → scan → the sidebar row and Overview card both warn.
+    /// To replicate: make a disposable folder in iOS DeviceSupport unreadable (`chmod 000`) → scan → the sidebar
+    /// row and Overview card both warn → restore its permissions.
     @Test("A snapshot's failures reach that category's metrics")
     func initFromSnapshot_carriesFailuresToCategoryMetrics() throws {
         let snapshot = ScanSnapshot(
@@ -203,7 +204,7 @@ struct StorageInventoryTests {
     }
 
     /// Verifies clearing then refilling one category cannot leave a failure on a category still scanning, which is
-    /// why the views don't check for scanning before showing a failure.
+    /// why the Overview card doesn't check for scanning before showing a failure.
     /// To replicate: scan with two failing categories → press ⌘R → while the second still scans, it shows no warning.
     @Test("After clearing, only categories that report again carry a failure")
     func clearingThenReplacing_leavesUnreportedCategoriesWithoutFailure() {

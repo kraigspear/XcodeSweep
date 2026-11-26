@@ -71,7 +71,8 @@ struct StorageInventory: Equatable, Sendable {
         itemsByCategory[category] ?? []
     }
 
-    /// Why `category`'s last scan is incomplete, or `nil` if it was fully read.
+    /// Why `category`'s last scan is incomplete, or `nil` if no failure is recorded, as for a category still
+    /// scanning.
     func scanFailure(in category: StorageCategory) -> String? {
         scanFailures[category]
     }
@@ -149,7 +150,8 @@ struct CategoryMetrics: Identifiable, Equatable, Hashable, Sendable {
     let totalBytes: Int64
     let reclaimableCount: Int
     let reclaimableBytes: Int64
-    /// Why this category's last scan is incomplete, or `nil` if it was fully read.
+    /// Why this category's last scan is incomplete, or `nil` if no failure is recorded, as for a category still
+    /// scanning.
     let failure: String?
 
     var id: StorageCategory {
