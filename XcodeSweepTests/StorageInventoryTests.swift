@@ -152,8 +152,8 @@ struct StorageInventoryTests {
     // MARK: - Scan failures
 
     /// Verifies each category's metrics carry its scan failure, so a view never joins failures from elsewhere.
-    /// To replicate: make a disposable folder in iOS DeviceSupport unreadable (`chmod 000`) → scan → the sidebar
-    /// row and Overview card both warn → restore its permissions.
+    /// To replicate: make `~/Library/Developer/Xcode/iOS DeviceSupport` unreadable (`chmod 000`) → scan → the
+    /// sidebar row and Overview card both warn → restore its permissions.
     @Test("A snapshot's failures reach that category's metrics")
     func initFromSnapshot_carriesFailuresToCategoryMetrics() throws {
         let snapshot = ScanSnapshot(
