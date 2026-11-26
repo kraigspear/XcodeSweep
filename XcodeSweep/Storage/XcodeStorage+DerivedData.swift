@@ -3,11 +3,12 @@ import Foundation
 extension XcodeStorage {
     static let moduleCacheFolderName = "ModuleCache.noindex"
 
-    func scanDerivedData(_ projectFolders: [URL], now: Date) async -> [StorageItem] {
+    /// `failure` is why the DerivedData folder couldn't be listed, found when its folders were classified.
+    func scanDerivedData(_ projectFolders: [URL], failure: String?, now: Date) async -> CategoryScan {
         let items = await Self.scanConcurrently(projectFolders, limiter: folderWalkLimiter) { folderURL in
             try Self.inspectDerivedDataFolder(at: folderURL, now: now)
         }
-        return Self.namingFoldersOfSharedWorkspaces(items)
+        return CategoryScan(items: Self.namingFoldersOfSharedWorkspaces(items), failure: failure)
     }
 
     /// Rows built from the same workspace, such as Xcode's folder and an `xcodebuild -derivedDataPath`

@@ -4,7 +4,7 @@ extension XcodeStorage {
     // MARK: - Device Support
 
     /// `failure` names each DeviceSupport folder that couldn't be read.
-    func scanDeviceSupport(now: Date) async -> (items: [StorageItem], failure: String?) {
+    func scanDeviceSupport(now: Date) async -> CategoryScan {
         let folderNames = [
             ("iOS DeviceSupport", "iOS"),
             ("watchOS DeviceSupport", "watchOS"),
@@ -49,7 +49,7 @@ extension XcodeStorage {
                 ]
             )
         }
-        return (items, failures.isEmpty ? nil : failures.joined(separator: "\n"))
+        return CategoryScan(items: items, failures: failures)
     }
 
     // MARK: - SwiftUI Previews
@@ -60,7 +60,7 @@ extension XcodeStorage {
     /// When `simctl` can't list the set, every folder is protected: any of them may be registered,
     /// and trashing one behind CoreSimulator's back leaves its set pointing at a missing device.
     /// Without the set's folder there is nothing to list, and `simctl` would fail on the missing path.
-    func scanPreviews(now: Date) async -> (items: [StorageItem], failure: String?) {
+    func scanPreviews(now: Date) async -> CategoryScan {
         let previewsDevicesURL = xcodeRootURL
             .appendingPathComponent("UserData/Previews/Simulator Devices", isDirectory: true)
 
@@ -69,7 +69,7 @@ extension XcodeStorage {
         do {
             // Listed rather than checked for existence, so a set behind a folder that can't be read
             // is a failure, not a missing set.
-            guard let listed = try Self.folderEntries(of: previewsDevicesURL) else { return ([], nil) }
+            guard let listed = try Self.folderEntries(of: previewsDevicesURL) else { return .empty }
             entries = listed
         } catch {
             entries = []
@@ -144,27 +144,28 @@ extension XcodeStorage {
             )
         }
 
-        let items = ((registered ?? []) + leftoverItems).sorted { $0.sizeBytes > $1.sizeBytes }
-        return (items, failures.isEmpty ? nil : failures.joined(separator: "\n"))
+        return CategoryScan(items: (registered ?? []) + leftoverItems, failures: failures)
     }
 
     // MARK: - Archives & Caches
 
     /// `failure` names each archives folder that couldn't be read.
-    func scanArchivesAndCaches(
-        sharedCaches: [URL],
-        now: Date
-    ) async throws(CancellationError) -> (items: [StorageItem], failure: String?) {
+    func scanArchivesAndCaches(sharedCaches: [URL], now: Date) async -> CategoryScan {
         var items: [StorageItem] = []
         var failures: [String] = []
 
         // 1. Caches Xcode shares across projects in DerivedData
         let lane = folderWalkLimiter.makeLane()
         let isCustom = xcodeLocations.hasCustomDerivedData
-        for cacheURL in sharedCaches {
-            try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
-                try Self.inspectSharedCache(at: cacheURL, inCustomFolder: isCustom, now: now)
-            })
+        do throws(CancellationError) {
+            for cacheURL in sharedCaches {
+                try await items.append(folderWalkLimiter.withPermit(in: lane) { () throws(CancellationError) in
+                    try Self.inspectSharedCache(at: cacheURL, inCustomFolder: isCustom, now: now)
+                })
+            }
+        } catch {
+            // Cancelled: the scan drops this result.
+            return .empty
         }
 
         // 2. Archives/YYYY-MM-DD/*.xcarchive
@@ -204,7 +205,7 @@ extension XcodeStorage {
         }
         items.append(contentsOf: archiveItems)
 
-        return (items.sorted { $0.sizeBytes > $1.sizeBytes }, failures.isEmpty ? nil : failures.joined(separator: "\n"))
+        return CategoryScan(items: items, failures: failures)
     }
 
     // MARK: - Private Inspection

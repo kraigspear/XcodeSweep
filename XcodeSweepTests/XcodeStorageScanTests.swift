@@ -257,6 +257,52 @@ struct XcodeStorageScanTests {
         }
     }
 
+    /// Tables open largest first, and Overview's "Review Recommended" picks from that order.
+    @Test("Every category's items arrive largest first")
+    func scannedItemsArriveLargestFirst() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let now = testISO8601Date("2026-11-21T10:00:00Z")
+        for (index, payloadBytes) in [4096, 65536, 16384].enumerated() {
+            try fixture.addDerivedData(
+                folderName: "App\(index)-folder",
+                workspacePath: "/nonexistent/App\(index).xcodeproj",
+                lastAccessed: now,
+                payloadBytes: payloadBytes
+            )
+        }
+        // simctl lists these smallest first, so only a sort puts them largest first.
+        let devicesJSON = """
+        {
+          "devices": {
+            "com.apple.CoreSimulator.SimRuntime.iOS-26-4": [
+              { "udid": "SIM-S", "name": "Small", "state": "Shutdown", "isAvailable": true,
+                "dataPathSize": 1000, "logPathSize": 0 },
+              { "udid": "SIM-L", "name": "Large", "state": "Shutdown", "isAvailable": true,
+                "dataPathSize": 3000, "logPathSize": 0 },
+              { "udid": "SIM-M", "name": "Medium", "state": "Shutdown", "isAvailable": true,
+                "dataPathSize": 2000, "logPathSize": 0 }
+            ]
+          }
+        }
+        """
+        let storage = XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: StubCommandRunner(devicesJSON: devicesJSON),
+            fileTrasher: RecordingFileTrasher(),
+            now: { now }
+        )
+
+        let snapshot = try await finalScanSnapshot(from: storage)
+
+        #expect(snapshot.itemsByCategory[.simulatorDevices]?.map(\.name) == ["Large", "Medium", "Small"])
+        #expect(snapshot.itemsByCategory[.derivedData]?.count == 3)
+        for (category, items) in snapshot.itemsByCategory {
+            let sizes = items.map(\.sizeBytes)
+            #expect(sizes == sizes.sorted(by: >), "\(category) isn't largest first")
+        }
+    }
+
     @Test("Records a failure for each simctl category instead of failing the scan")
     func simctlFailuresAreCategoryFailures() async throws {
         let fixture = try TempXcodeFixture()

@@ -24,6 +24,43 @@ enum ScanEvent: Equatable, Sendable {
     case completed(ScanSnapshot)
 }
 
+/// One category's scan: its items, and why the scan is incomplete, if it is.
+struct CategoryScan: Sendable {
+    static let empty = CategoryScan(items: [], failure: nil)
+
+    let items: [StorageItem]
+    let failure: String?
+
+    init(items: [StorageItem], failure: String?) {
+        self.items = items
+        self.failure = failure
+    }
+
+    /// Joins `failures`, one per line; none means the scan is complete.
+    init(items: [StorageItem], failures: [String]) {
+        self.init(items: items, failure: failures.isEmpty ? nil : failures.joined(separator: "\n"))
+    }
+
+    /// The items `scan` returns, or its error as the failure; cancellation is no failure.
+    static func catchingFailure(_ scan: () async throws -> [StorageItem]) async -> CategoryScan {
+        do {
+            return try await CategoryScan(items: scan(), failure: nil)
+        } catch is CancellationError {
+            return .empty
+        } catch {
+            return CategoryScan(items: [], failure: error.localizedDescription)
+        }
+    }
+}
+
+/// What every category scan in one run shares.
+struct ScanContext: Sendable {
+    /// The reference date items are aged against.
+    let now: Date
+    /// Classified once, so a folder Xcode is creating mid-scan lands in exactly one category.
+    let derivedDataFolders: (projects: [URL], sharedCaches: [URL], failure: String?)
+}
+
 /// Ordered lifecycle events emitted by `XcodeStorage.delete(_:)`.
 enum DeletionEvent: Equatable, Sendable {
     case starting(DeletionProgress)
@@ -138,10 +175,38 @@ struct XcodeStorage: Sendable {
         }
     }
 
+    // MARK: - Category Scans
+
+    /// Scans one category, sorted largest first.
+    ///
+    /// Never throws: each category scan turns its own errors into the result's failure. A scan cut
+    /// short by cancellation returns what it has, which the producer then drops.
+    func scan(_ category: StorageCategory, in context: ScanContext) async -> CategoryScan {
+        let result = switch category {
+        case .derivedData:
+            await scanDerivedData(
+                context.derivedDataFolders.projects,
+                failure: context.derivedDataFolders.failure,
+                now: context.now
+            )
+        case .simulatorDevices:
+            await scanSimulatorDevices(now: context.now)
+        case .simulatorRuntimes:
+            await scanSimulatorRuntimes(now: context.now)
+        case .deviceSupport:
+            await scanDeviceSupport(now: context.now)
+        case .previews:
+            await scanPreviews(now: context.now)
+        case .archivesAndCaches:
+            await scanArchivesAndCaches(sharedCaches: context.derivedDataFolders.sharedCaches, now: context.now)
+        }
+        return CategoryScan(items: result.items.sorted { $0.sizeBytes > $1.sizeBytes }, failure: result.failure)
+    }
+
     // MARK: - Shared Internal Helpers
 
     /// Inspects `inputs` concurrently, as many at once as `limiter` allows in one lane of its own,
-    /// returning the items found sorted largest first.
+    /// returning the items found in no particular order.
     ///
     /// A child whose cancellation is seen before it holds a permit skips its input, and an input
     /// whose `inspect` throws contributes no item; the inspections here throw only on cancellation.
@@ -164,7 +229,7 @@ struct XcodeStorage: Sendable {
                     items.append(item)
                 }
             }
-            return items.sorted { $0.sizeBytes > $1.sizeBytes }
+            return items
         }
     }
 
@@ -301,82 +366,34 @@ private struct StructuredScanStream: AsyncSequence, Sendable {
                 }
 
                 let volume = storage.readVolume()
-                let referenceDate = storage.now()
-                // Classified once, so a folder Xcode is creating mid-scan lands in exactly one category.
-                let derivedData = storage.derivedDataFolders()
+                let context = ScanContext(now: storage.now(), derivedDataFolders: storage.derivedDataFolders())
 
                 let snapshot = await withTaskGroup(
-                    of: (StorageCategory, [StorageItem], String?)?.self,
+                    of: (StorageCategory, CategoryScan)?.self,
                     returning: ScanSnapshot.self
                 ) { group in
-                    group.addTask {
-                        guard !Task.isCancelled else { return nil }
-                        let items = await storage.scanDerivedData(derivedData.projects, now: referenceDate)
-                        guard !Task.isCancelled else { return nil }
-                        return (.derivedData, items, derivedData.failure)
-                    }
-
-                    group.addTask {
-                        do {
-                            let items = try await storage.scanSimulatorDevices(now: referenceDate)
-                            return (.simulatorDevices, items, nil)
-                        } catch is CancellationError {
-                            return nil
-                        } catch {
-                            return (.simulatorDevices, [], error.localizedDescription)
+                    for category in StorageCategory.allCases {
+                        group.addTask {
+                            guard !Task.isCancelled else { return nil }
+                            return await (category, storage.scan(category, in: context))
                         }
-                    }
-
-                    group.addTask {
-                        do {
-                            let items = try await storage.scanSimulatorRuntimes(now: referenceDate)
-                            return (.simulatorRuntimes, items, nil)
-                        } catch is CancellationError {
-                            return nil
-                        } catch {
-                            return (.simulatorRuntimes, [], error.localizedDescription)
-                        }
-                    }
-
-                    group.addTask {
-                        guard !Task.isCancelled else { return nil }
-                        let deviceSupport = await storage.scanDeviceSupport(now: referenceDate)
-                        guard !Task.isCancelled else { return nil }
-                        return (.deviceSupport, deviceSupport.items, deviceSupport.failure)
-                    }
-
-                    group.addTask {
-                        guard !Task.isCancelled else { return nil }
-                        let previews = await storage.scanPreviews(now: referenceDate)
-                        guard !Task.isCancelled else { return nil }
-                        return (.previews, previews.items, previews.failure)
-                    }
-
-                    group.addTask {
-                        guard !Task.isCancelled,
-                              let archives = try? await storage.scanArchivesAndCaches(
-                                  sharedCaches: derivedData.sharedCaches,
-                                  now: referenceDate
-                              ),
-                              !Task.isCancelled
-                        else { return nil }
-                        return (.archivesAndCaches, archives.items, archives.failure)
                     }
 
                     var itemsByCategory: [StorageCategory: [StorageItem]] = [:]
                     var failures: [StorageCategory: String] = [:]
 
-                    for await case let (category, items, failure)? in group {
+                    for await case let (category, result)? in group {
+                        // Once cancelled, a result may be partial or an empty stand-in; none is reported.
                         if Task.isCancelled {
                             continue
                         }
-                        itemsByCategory[category] = items
-                        failures[category] = failure
-                        continuation.yield(.categoryScanned(category, items, failure: failure))
+                        itemsByCategory[category] = result.items
+                        failures[category] = result.failure
+                        continuation.yield(.categoryScanned(category, result.items, failure: result.failure))
                     }
 
                     return ScanSnapshot(
-                        scannedAt: referenceDate,
+                        scannedAt: context.now,
                         itemsByCategory: itemsByCategory,
                         volume: volume,
                         failures: failures
