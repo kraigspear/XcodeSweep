@@ -25,6 +25,7 @@
           "children": [
             { "path": "ContentView.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "XcodeSweepApp.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
+            { "path": "Browsing.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
             { "path": "XcodeSweepStore.swift", "target-membership": [ "XcodeSweep/compile-sources" ] },
           ],
         },
@@ -85,6 +86,7 @@
         { "path": "StaleScanRefreshTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "StopForTerminationTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "StorageCategoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
+        { "path": "BrowsingTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "StorageInventoryTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeSweepStorePreviewTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
         { "path": "XcodeLocationsTests.swift", "target-membership": [ "XcodeSweepTests/compile-sources" ] },
