@@ -13,7 +13,7 @@ The scanned items in every category, the totals derived from them, and each cate
 _Avoid_: ScanSummary, summary, scanFailures (as separate state)
 
 **Browsing**:
-Where the user is and what they've narrowed to: destination, search, filter, sort, and selection. Moving to a new destination resets the rest.
+Where the user is and what they've narrowed to: destination, search, filter, sort, and selection. Moving to a new destination clears the selection, filter, and search; sort order persists.
 _Avoid_: UI state, navigation state, view model
 
 **Reclaimable**:

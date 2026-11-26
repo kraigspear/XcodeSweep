@@ -1,8 +1,6 @@
 import Foundation
 
 /// Where the user is and what they've narrowed to: destination, search, filter, sort, and selection.
-///
-/// Selection only ever holds items in the active category; `reconcile(with:)` relies on that.
 struct Browsing: Equatable {
     private(set) var destination: SidebarSelection = .overview
 
@@ -75,7 +73,7 @@ struct Browsing: Equatable {
         selectedItemIDs.removeAll()
     }
 
-    /// Drops selected items that `inventory` no longer holds in the active category.
+    /// Drops selected items that a finished scan's `inventory` no longer holds in the active category.
     mutating func reconcile(with inventory: StorageInventory) {
         guard let category = activeCategory else {
             selectedItemIDs.removeAll()

@@ -553,7 +553,7 @@ struct XcodeSweepStoreTests {
         #expect(store.pendingDeletion?.deletableItems.map(\.id) == visibleIDs)
     }
 
-    /// A folder removed outside the app must not stay selected, or the next cleanup would plan to delete it.
+    /// A folder removed outside the app loses its selection, so if it reappears later it isn't selected again.
     /// To replicate: select two DerivedData rows → delete one folder in Finder → Refresh.
     @Test("A finished scan drops selected items it no longer finds")
     func completedScan_dropsSelectedItemsThatAreGone() async throws {
@@ -854,6 +854,66 @@ struct XcodeSweepStoreTests {
         }
         _ = try await awaitResult(of: Task { await scan?.value }, within: .seconds(10)).get()
         #expect(store.inventory.scanFailure(in: .simulatorDevices) == "simctl unavailable")
+    }
+
+    /// A cancelled scan rolls back to the last inventory, hiding a selected row the rescan will find again;
+    /// deleting another row must not clear that hidden row's selection.
+    /// To replicate: Refresh → while scanning, select a new DerivedData row and an old one → Stop → delete the old
+    /// one.
+    @Test("Deleting a row keeps the selection of a row a cancelled scan hid", .timeLimit(.minutes(1)))
+    func deletion_afterCancelledScan_keepsHiddenRowSelected() async throws {
+        let fixture = try TempXcodeFixture()
+        defer { fixture.cleanup() }
+        let controller = ControllableCommandRunner()
+        let store = XcodeSweepStore(xcodeStorage: XcodeStorage(
+            xcodeRootURL: fixture.xcodeRootURL,
+            commandRunner: controller,
+            fileTrasher: RecordingFileTrasher(removingUnder: fixture.rootURL)
+        ))
+        try fixture.addDerivedData(
+            folderName: "Kept-1",
+            workspacePath: "/nonexistent/Kept.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+        let initialScan = store.startRefresh()
+        try await answerSimctl(controller)
+        await initialScan?.value
+        let keptItem = try #require(store.inventory.items(in: .derivedData).first)
+
+        // Given: both rows selected while a rescan shows the new one, then the rescan cancelled
+        try fixture.addDerivedData(
+            folderName: "Added-2",
+            workspacePath: "/nonexistent/Added.xcodeproj",
+            lastAccessed: Date.distantPast
+        )
+        store.startRefresh()
+        var rescanCalls: [ParkedCall<[String]>] = []
+        for _ in 0 ..< scanSimctlListCallCount {
+            try await rescanCalls.append(controller.nextPendingCall())
+        }
+        try await waitUntil("rescan reported new DerivedData") {
+            await store.inventory.items(in: .derivedData).count == 2
+        }
+        store.browsing.navigate(to: .category(.derivedData))
+        store.browsing.selectAllDeletableInActiveCategory(in: store.inventory)
+        let addedID = try #require(store.browsing.selectedItemIDs.subtracting([keptItem.id]).first)
+        store.cancelOperation()
+        for call in rescanCalls {
+            try await controller.waitForCancellation(id: call.id)
+        }
+        try await waitUntil("store returns to idle after cancelOperation") {
+            await store.operation == .idle
+        }
+        #expect(store.inventory.items(in: .derivedData).map(\.id) == [keptItem.id])
+
+        // When: the old row is deleted and the automatic rescan finds the new one again
+        let deletion = store.startDeletion(DeletionPlan(selection: [keptItem]))
+        try await answerSimctl(controller)
+        await deletion?.value
+
+        // Then: the new row is still selected
+        #expect(store.inventory.items(in: .derivedData).map(\.id) == [addedID])
+        #expect(store.browsing.selectedItemIDs == [addedID])
     }
 
     private func makeScannedStore(

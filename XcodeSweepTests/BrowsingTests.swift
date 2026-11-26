@@ -7,6 +7,8 @@ struct BrowsingTests {
     private let oldBuild = makeStorageItem(id: "dd-old", name: "SampleApp", status: .stale)
     private let otherBuild = makeStorageItem(id: "dd-other", name: "OtherApp", status: .active)
     private let worktreeBuild = makeStorageItem(id: "dd-worktree", name: "SampleApp-wt", status: .worktree)
+    /// Reclaimable but hidden by a "Sample" search, so the select helpers must leave it out.
+    private let otherOldBuild = makeStorageItem(id: "dd-other-old", name: "OtherApp-old", status: .stale)
     private let deadDevice = makeStorageItem(id: "sim-dead", category: .simulatorDevices, status: .unavailable)
     private let lockedRuntime = makeStorageItem(
         id: "runtime-locked",
@@ -18,7 +20,7 @@ struct BrowsingTests {
     private var inventory: StorageInventory {
         StorageInventory(
             itemsByCategory: [
-                .derivedData: [oldBuild, otherBuild, worktreeBuild],
+                .derivedData: [oldBuild, otherBuild, worktreeBuild, otherOldBuild],
                 .simulatorDevices: [deadDevice],
                 .simulatorRuntimes: [lockedRuntime],
             ],
@@ -78,7 +80,7 @@ struct BrowsingTests {
         #expect(browsing.destination == .category(.derivedData))
         #expect(browsing.statusFilter == .reclaimable)
         #expect(browsing.searchText.isEmpty)
-        #expect(browsing.selectedItemIDs == [oldBuild.id])
+        #expect(browsing.selectedItemIDs == [oldBuild.id, otherOldBuild.id])
     }
 
     @Test("Select helpers act only on visible items in the active category")
@@ -149,11 +151,9 @@ struct BrowsingTests {
 
         let names = browsing.visibleItems(for: .derivedData, in: inventory).map(\.name)
 
-        #expect(names == ["OtherApp", "SampleApp", "SampleApp-wt"])
+        #expect(names == ["OtherApp", "OtherApp-old", "SampleApp", "SampleApp-wt"])
     }
 
-    /// Selection only ever holds items in the active category, which is what lets one reconcile cover both a
-    /// finished scan and each deleted item.
     @Test("Reconciling keeps only selected items still in the active category")
     func reconcile_dropsItemsNoLongerInActiveCategory() {
         var browsing = Browsing()

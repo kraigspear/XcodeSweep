@@ -280,7 +280,8 @@ final class XcodeSweepStore {
                         removed.append(item)
                     }
                     inventory = inventory.removingItems(withIDs: [itemID])
-                    browsing.reconcile(with: inventory)
+                    // Only this ID: a cancelled scan's rollback can hide selected rows the rescan will restore.
+                    browsing.selectedItemIDs.remove(itemID)
 
                 case let .failed(failure, progress):
                     operation = .deleting(progress)
