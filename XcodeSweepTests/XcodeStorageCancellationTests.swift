@@ -101,7 +101,7 @@ struct XcodeStorageCancellationTests {
         let events = await recorder.snapshot()
         #expect(events == [
             .starting(
-                DeletionProgress(completedCount: 0, totalCount: 2, currentItemName: "iPhone 17", removedBytes: 0)
+                DeletionProgress(completedCount: 0, totalCount: 2, currentItemName: "iPhone 17", report: .empty)
             ),
         ])
     }
@@ -186,7 +186,7 @@ struct XcodeStorageCancellationTests {
             var iterator = storage.delete(DeletionPlan(selection: [item])).makeAsyncIterator()
             let first = try await iterator.next()
             #expect(first == .starting(
-                DeletionProgress(completedCount: 0, totalCount: 1, currentItemName: "SampleApp", removedBytes: 0)
+                DeletionProgress(completedCount: 0, totalCount: 1, currentItemName: "SampleApp", report: .empty)
             ))
             await sawStarting.signal()
             await proceedAfterCancel.wait()

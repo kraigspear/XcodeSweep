@@ -58,6 +58,14 @@ struct XcodeStorageDeletionTests {
         #expect(failure.itemID == "derivedData:\(badURL.path)")
         #expect(afterSecond.completedCount == 2)
 
+        // Each progress carries the outcomes so far; the last one is the completed report.
+        #expect(startFirst.report == .empty)
+        #expect(afterFirst.report.deletedCount == 1)
+        #expect(afterFirst.report.failures.isEmpty)
+        #expect(startSecond.report == afterFirst.report)
+        #expect(afterSecond.report.failures == [failure])
+        #expect(afterSecond.report == report)
+
         #expect(report.deletedCount == 1)
         #expect(report.trashedCount == 1)
         #expect(report.simctlDeletedCount == 0)
@@ -140,7 +148,7 @@ struct XcodeStorageDeletionTests {
                     completedCount: 0,
                     totalCount: 2,
                     currentItemName: "iPhone 17 Pro",
-                    removedBytes: 0
+                    report: .empty
                 )
             ),
         ])
@@ -163,7 +171,7 @@ struct XcodeStorageDeletionTests {
         let eventsBeforeFailureResolves = await recorder.snapshot()
         #expect(eventsBeforeFailureResolves == [
             .starting(
-                DeletionProgress(completedCount: 0, totalCount: 2, currentItemName: "iPhone 17 Pro", removedBytes: 0)
+                DeletionProgress(completedCount: 0, totalCount: 2, currentItemName: "iPhone 17 Pro", report: .empty)
             ),
             .deleted(
                 itemID: "sim-1",
@@ -171,7 +179,7 @@ struct XcodeStorageDeletionTests {
                     completedCount: 1,
                     totalCount: 2,
                     currentItemName: "iPhone 17 Pro",
-                    removedBytes: 4_000_000_000
+                    report: .empty.recordingRemoval(of: bootedDevice)
                 )
             ),
             .starting(
@@ -179,7 +187,7 @@ struct XcodeStorageDeletionTests {
                     completedCount: 1,
                     totalCount: 2,
                     currentItemName: "iOS 26.4",
-                    removedBytes: 4_000_000_000
+                    report: .empty.recordingRemoval(of: bootedDevice)
                 )
             ),
         ])

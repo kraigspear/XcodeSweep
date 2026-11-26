@@ -465,9 +465,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
         private let storage: XcodeStorage
         private let items: [StorageItem]
         private var phase: Phase
-        private var removed: [StorageItem] = []
-        private var reclaimedBytes: Int64 = 0
-        private var failures: [DeletionFailure] = []
+        private var deletionReport = DeletionReport.empty
 
         init(storage: XcodeStorage, items: [StorageItem]) {
             self.storage = storage
@@ -480,7 +478,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
                 completedCount: index + 1,
                 totalCount: items.count,
                 currentItemName: items[index].name,
-                removedBytes: reclaimedBytes
+                report: deletionReport
             )
         }
 
@@ -501,7 +499,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
                     completedCount: index,
                     totalCount: items.count,
                     currentItemName: item.name,
-                    removedBytes: reclaimedBytes
+                    report: deletionReport
                 )
                 return .starting(progress)
 
@@ -515,8 +513,7 @@ private struct DeletionStream: AsyncSequence, Sendable {
                     outcome=removed method=\(item.deletionMethod.logName, privacy: .public) \
                     bytes=\(item.sizeBytes, privacy: .public) target=\(item.deletionMethod.logTarget, privacy: .public)
                     """)
-                    removed.append(item)
-                    reclaimedBytes += item.sizeBytes
+                    deletionReport = deletionReport.recordingRemoval(of: item)
                     return .deleted(itemID: item.id, progress: progress(completing: index))
                 } catch is RemovalInterrupted {
                     // A stopped trash move or simctl command may still have taken effect.
@@ -544,13 +541,13 @@ private struct DeletionStream: AsyncSequence, Sendable {
                         itemName: item.name,
                         reason: error.localizedDescription
                     )
-                    failures.append(failure)
+                    deletionReport = deletionReport.recordingFailure(failure)
                     return .failed(failure, progress: progress(completing: index))
                 }
 
             case .finish:
                 phase = .done
-                return .completed(DeletionReport(removed: removed, failures: failures))
+                return .completed(deletionReport)
             }
         }
     }
